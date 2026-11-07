@@ -16,6 +16,7 @@ import {
 } from "@components/modal/Modal";
 import ModalHeader from "@components/modal/ModalHeader";
 import Paragraph from "@components/Paragraph";
+import { SegmentedTabs } from "@components/SegmentedTabs";
 import { SelectDropdown } from "@components/select/SelectDropdown";
 import SettingCard from "@components/SettingCard";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@components/Tabs";
@@ -30,6 +31,7 @@ import {
   KeyRound,
   ListIcon,
   Loader2,
+  LogInIcon,
   MinusCircleIcon,
   PlusCircle,
   PlusIcon,
@@ -62,12 +64,26 @@ import {
   ProviderModel,
 } from "@/modules/agent-network/data/mockData";
 import {
+  ProviderLinkBody,
+  ProviderLinkHeader,
+} from "@/modules/agent-network/ProviderLinkModal";
+import {
+  AuthMethod,
+  authMethodOf,
+  catalogIdFor,
+  isLoginAlternative,
+  loginAlternativeOf,
+  pickerIdOf,
   subscriptionName,
   userOAuthUpstreamUrl,
   usesUserOAuth,
 } from "@/modules/agent-network/subscriptionLink";
 import { useDiscoveredModels } from "@/modules/agent-network/useDiscoveredModels";
 import { useProviderCatalog } from "@/modules/agent-network/useProviderCatalog";
+import {
+  useProviderLink,
+  useRefreshLinkState,
+} from "@/modules/agent-network/useProviderLink";
 
 // EXTRA_HEADER_UI owns the dashboard copy for catalog-declared extra
 // headers, keyed by ExtraHeader.name. Backend declares only the wire
@@ -339,11 +355,38 @@ export default function AIProviderModal({
   // Custom-kind providers (the generic "Custom" entry and named self-hosted
   // ones like vLLM) share the self-hosted extras, e.g. Skip TLS verification.
   const isCustomKind = catalog?.kind === "custom";
-  // A user_oauth entry has no operator key: each user links their own login,
+  // A user_oauth entry has no operator key: an administrator links one login,
   // and the server pins the upstream to the vendor host.
   const userOAuth = usesUserOAuth(catalog);
   const pinnedUpstreamUrl =
     userOAuth && catalog ? userOAuthUpstreamUrl(catalog) : undefined;
+  // A vendor's login entry (OpenAI's ChatGPT login) is not in the picker: the
+  // operator picks the vendor, then how it signs in. The choice is offered only
+  // when the server's catalog carries the login entry.
+  const pickerId = pickerIdOf(providerId) as AIProviderId;
+  const authMethod = authMethodOf(providerId);
+  const loginId = loginAlternativeOf(pickerId);
+  const offersLogin = !!loginId && !!getById(loginId);
+  // Switching a saved record between a key and a login would change what the
+  // record is (and drop a linked login), so a saved provider keeps its method.
+  const switchAuth = (method: AuthMethod) => {
+    const next = catalogIdFor(pickerId, method) as AIProviderId;
+    if (isEdit || next === providerId) return;
+    const c = getById(next);
+    setProviderId(next);
+    setApiKey("");
+    setKeyFileName(null);
+    setModels([]);
+    setUpstreamUrl(c?.default_host ? `https://${c.default_host}` : "");
+    if (c) setName(uniqueNameRef.current(c.name));
+  };
+
+  // After a login provider is created, the modal moves on to linking its
+  // login. linkTarget is the new record's id; closing before the link lands
+  // leaves the provider created and not linked.
+  const [linkTarget, setLinkTarget] = useState<string>();
+  const refreshLinkState = useRefreshLinkState();
+  const link = useProviderLink({ onLinked: refreshLinkState });
   const customizableHeaderPair =
     catalog?.identity_injection?.header_pair?.customizable === true;
   const customizableJsonMetadata =
@@ -482,6 +525,7 @@ export default function AIProviderModal({
 
   const reset = () => {
     setTab("provider");
+    setLinkTarget(undefined);
     if (isEdit && provider) {
       setProviderId(provider.providerId);
       setName(provider.name);
@@ -516,6 +560,7 @@ export default function AIProviderModal({
   // operator has opened by then. The dismissal is refused instead of faked.
   const handleClose = () => {
     if (saveInFlight) return;
+    link.cancel();
     onOpenChange(false);
     setTimeout(reset, 200);
   };
@@ -655,6 +700,11 @@ export default function AIProviderModal({
       }
       const created = await addProvider(input);
       if (!created) return;
+      if (userOAuth) {
+        setLinkTarget(created.id);
+        link.start(created.id);
+        return;
+      }
       closeAfterSave();
     } finally {
       setSaveInFlight(false);
@@ -676,12 +726,14 @@ export default function AIProviderModal({
       provider: "AI Providers",
       custom: "Other",
     };
-    const sorted = [...catalogList].sort((a, b) => {
-      const ra = groupRank[a.kind] ?? 99;
-      const rb = groupRank[b.kind] ?? 99;
-      if (ra !== rb) return ra - rb;
-      return a.name.localeCompare(b.name);
-    });
+    const sorted = catalogList
+      .filter((p) => !isLoginAlternative(p.id))
+      .sort((a, b) => {
+        const ra = groupRank[a.kind] ?? 99;
+        const rb = groupRank[b.kind] ?? 99;
+        if (ra !== rb) return ra - rb;
+        return a.name.localeCompare(b.name);
+      });
     return sorted.map((p) => ({
       value: p.id,
       label: p.name,
@@ -895,6 +947,47 @@ export default function AIProviderModal({
     pricingSurfaces.includes("anthropic") ||
     pricingSurfaces.includes("bedrock");
 
+  // After a login provider is created, the same modal links its login.
+  if (linkTarget) {
+    return (
+      <Modal open={open} onOpenChange={(o) => (o ? null : handleClose())}>
+        <ModalContent
+          maxWidthClass={"max-w-2xl"}
+          data-testid={"agent-network-provider-modal"}
+        >
+          <ProviderLinkHeader catalogId={providerId} />
+          <div className={"px-8 pb-8"}>
+            <ProviderLinkBody
+              state={link.state}
+              catalogId={providerId}
+              onRetry={() => link.start(linkTarget)}
+            />
+          </div>
+          <ModalFooter className={"items-center"}>
+            <div className={"w-full"}>
+              <Paragraph className={"text-sm mt-auto"}>
+                {link.state.phase === "linked"
+                  ? `${name} is ready to use.`
+                  : `${name} is connected. Requests are refused until a login is linked; you can also link it later from the providers table.`}
+              </Paragraph>
+            </div>
+            <div className={"flex gap-3 justify-end shrink-0"}>
+              <Button
+                variant={
+                  link.state.phase === "linked" ? "primary" : "secondary"
+                }
+                onClick={handleClose}
+                data-testid={"agent-network-provider-link-close"}
+              >
+                {link.state.phase === "linked" ? "Done" : "Link later"}
+              </Button>
+            </div>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+    );
+  }
+
   return (
     <Modal open={open} onOpenChange={(o) => (o ? null : handleClose())}>
       <ModalContent
@@ -1001,7 +1094,7 @@ export default function AIProviderModal({
                 >
                   <SelectDropdown
                     data-testid={"agent-network-provider-type"}
-                    value={providerId}
+                    value={pickerId}
                     onChange={(v) => {
                       const next = v as AIProviderId;
                       setProviderId(next);
@@ -1063,6 +1156,43 @@ export default function AIProviderModal({
                 />
               </div>
 
+              {offersLogin && (
+                <FormRow
+                  label={"Sign-in method"}
+                  helpText={
+                    isEdit
+                      ? "A saved provider keeps its sign-in method."
+                      : `An API key, or one ${subscriptionName(
+                          loginId,
+                        )} login shared by everyone the policies cover.`
+                  }
+                >
+                  <SegmentedTabs
+                    value={authMethod}
+                    onChange={(v) => switchAuth(v as AuthMethod)}
+                  >
+                    <SegmentedTabs.List className={"rounded-lg border"}>
+                      <SegmentedTabs.Trigger
+                        value={"api_key"}
+                        disabled={isEdit && authMethod !== "api_key"}
+                        data-testid={"agent-network-provider-auth-api-key"}
+                      >
+                        <KeyRound size={14} />
+                        API key
+                      </SegmentedTabs.Trigger>
+                      <SegmentedTabs.Trigger
+                        value={"login"}
+                        disabled={isEdit && authMethod !== "login"}
+                        data-testid={"agent-network-provider-auth-login"}
+                      >
+                        <LogInIcon size={14} />
+                        {subscriptionName(loginId)}
+                      </SegmentedTabs.Trigger>
+                    </SegmentedTabs.List>
+                  </SegmentedTabs>
+                </FormRow>
+              )}
+
               {isCustomKind && !userOAuth && (
                 <FancyToggleSwitch
                   value={skipTlsVerification}
@@ -1102,13 +1232,22 @@ export default function AIProviderModal({
 
               {userOAuth ? (
                 <Callout
-                  variant={"info"}
+                  variant={"warning"}
+                  icon={
+                    <AlertCircleIcon
+                      size={14}
+                      className={"shrink-0 relative top-[3px]"}
+                    />
+                  }
                   data-testid={"agent-network-provider-user-oauth"}
                 >
-                  No API key needed. Each user links their own{" "}
-                  {subscriptionName(providerId)} subscription from the{" "}
-                  <strong>Connect Agent</strong> page, and their requests are
-                  billed to that plan.
+                  Everyone this provider&apos;s policies cover shares one{" "}
+                  {subscriptionName(providerId)} plan, and all of their requests
+                  count toward its usage limits.
+                  {!isEdit &&
+                    ` After you connect the provider, sign in to ${subscriptionName(
+                      providerId,
+                    )} to link the plan.`}
                 </Callout>
               ) : providerId === "vertex_ai_api" ? (
                 <FormRow
@@ -1725,9 +1864,9 @@ export default function AIProviderModal({
                   {userOAuth ? (
                     <HelpText margin={false}>
                       Models users may ask for through this endpoint. Empty =
-                      any model their plan includes. Usage is billed to each
-                      user&apos;s plan, so the per-1k prices only feed
-                      NetBird&apos;s cost estimates.
+                      any model the linked plan includes. Usage is billed to
+                      that plan, so the per-1k prices only feed NetBird&apos;s
+                      cost estimates.
                     </HelpText>
                   ) : (
                     <HelpText margin={false}>

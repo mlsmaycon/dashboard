@@ -23,6 +23,7 @@ import {
   PolicyLimits,
   ProviderModel,
 } from "@/modules/agent-network/data/mockData";
+import type { SubscriptionLink } from "@/modules/agent-network/subscriptionLink";
 import { useAgentNetworkMode } from "@/modules/agent-network/useAgentNetworkMode";
 import { useMyAgentNetworkSetup } from "@/modules/agent-network/useMyAgentNetworkSetup";
 
@@ -63,6 +64,8 @@ export type APIProvider = {
   // Disable identity metadata injection (caller user + authorizing group) on
   // upstream requests. Off by default (metadata is sent).
   metadata_disabled?: boolean;
+  // Present for user_oauth providers: the provider's linked login.
+  subscription_link?: SubscriptionLink;
   enabled: boolean;
   created_at: string;
   updated_at: string;
@@ -217,6 +220,7 @@ function fromAPI(p: APIProvider): AIProvider {
     identityHeaderGroups: p.identity_header_groups,
     skipTlsVerification: p.skip_tls_verification ?? false,
     metadataDisabled: p.metadata_disabled ?? false,
+    subscriptionLink: p.subscription_link,
     status: p.enabled ? "active" : "disabled",
     models,
     allowedGroups: [],

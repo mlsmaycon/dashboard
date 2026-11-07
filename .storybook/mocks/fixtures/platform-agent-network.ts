@@ -40,11 +40,12 @@ const catalog = [
       model("o3", "o3", 0.002, 0.008),
     ],
   },
-  /* The one user_oauth entry: no operator key, each user links their own ChatGPT plan. */
+  /* The one user_oauth entry: no operator key, an administrator links one ChatGPT login to the
+     provider. The modal reaches it through OpenAI's sign-in method rather than listing it. */
   {
     id: "chatgpt_codex",
-    name: "ChatGPT (Codex)",
-    description: "Codex on each user's own ChatGPT plan",
+    name: "OpenAI (ChatGPT login)",
+    description: "Codex on a ChatGPT plan shared through one login",
     default_host: "chatgpt.com",
     auth_header_template: "Authorization: Bearer {key}",
     default_content_type: "application/json",
@@ -307,6 +308,23 @@ export const agentProviders = [
     updated_at: updated,
   },
   {
+    id: "anp-chatgpt",
+    provider_id: "chatgpt_codex",
+    name: "ChatGPT team plan",
+    upstream_url: "https://chatgpt.com",
+    models: [],
+    subscription_link: {
+      status: "linked",
+      plan_type: "pro",
+      linked_at: "2026-10-01T08:00:00Z",
+      linked_by: USER.admin,
+      last_refreshed_at: "2026-10-08T07:40:00Z",
+    },
+    enabled: true,
+    created_at: created,
+    updated_at: updated,
+  },
+  {
     id: "anp-litellm",
     provider_id: "litellm_proxy",
     name: "LiteLLM Gateway",
@@ -536,10 +554,10 @@ export const agentConfig = {
 
 type SubscriptionLinkStatus = "linked" | "not_linked" | "needs_relink";
 
-/* A ChatGPT provider as agent-config reports it, in the caller's given link state. */
+/* A ChatGPT-login provider as agent-config reports it, with its login in the given state. */
 export const chatgptConfigProvider = (status: SubscriptionLinkStatus) => ({
   id: "anp-chatgpt",
-  name: "ChatGPT",
+  name: "ChatGPT team plan",
   catalog_id: "chatgpt_codex",
   api_flavor: "openai",
   all_models_allowed: true,
@@ -553,11 +571,29 @@ export const chatgptConfigProvider = (status: SubscriptionLinkStatus) => ({
       : { status },
 });
 
-/* The account's agent config with a ChatGPT provider next to the keyed ones. */
+/* A caller whose only provider signs in with the ChatGPT login, so the page opens on Codex. */
 export const agentConfigWithChatGPT = (status: SubscriptionLinkStatus) => ({
   ...agentConfig,
-  providers: [...agentConfig.providers, chatgptConfigProvider(status)],
+  providers: [chatgptConfigProvider(status)],
 });
+
+/* One ChatGPT-login provider per login state, for the providers table. */
+export const chatgptProvidersByLoginState = (
+  ["linked", "not_linked", "needs_relink"] as const
+).map((status, i) => ({
+  ...agentProviders.find((p) => p.id === "anp-chatgpt")!,
+  id: `anp-chatgpt-${status}`,
+  name: ["ChatGPT team plan", "ChatGPT research", "ChatGPT support"][i],
+  subscription_link:
+    status === "not_linked"
+      ? { status }
+      : {
+          status,
+          plan_type: status === "linked" ? "pro" : "plus",
+          linked_at: "2026-08-12T08:00:00Z",
+          linked_by: USER.admin,
+        },
+}));
 
 /* A device-code login as POST/GET .../link answer it. The code expires 15 minutes after the request,
    so the dialog reads the same whenever it is captured. */
@@ -776,7 +812,22 @@ export const agentNetworkFixtures: Record<string, Handler> = {
   },
   "GET /agent-network/access-logs": paginated(accessLogs),
   "GET /agent-network/access-log-sessions": paginated(sessions),
-  // The caller's own subscription link: the login stays pending until a story says otherwise.
+  // A created provider echoes the request; a ChatGPT-login one starts without a linked login.
+  "POST /agent-network/providers": ({ body }: HandlerContext) => {
+    const req = body as { provider_id?: string };
+    return {
+      ...req,
+      id: "anp-new",
+      models: [],
+      enabled: true,
+      created_at: created,
+      updated_at: created,
+      ...(req.provider_id === "chatgpt_codex"
+        ? { subscription_link: { status: "not_linked" } }
+        : {}),
+    };
+  },
+  // Linking a provider's login: it stays pending until a story says otherwise.
   "POST /agent-network/providers/:id/link": linkFlow("pending"),
   "GET /agent-network/providers/:id/link/:flowId": linkFlow("pending"),
   "DELETE /agent-network/providers/:id/link": {},

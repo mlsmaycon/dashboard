@@ -1,16 +1,20 @@
 /**
- * Agent Network ChatGPT (Codex) provider spec.
+ * Agent Network ChatGPT login provider spec.
  *
- * chatgpt_codex is a user_oauth catalog entry: the operator supplies no API
- * key, the upstream is pinned to https://chatgpt.com, and every user links
- * their own ChatGPT plan from the Connect Agent page. This walks the operator
- * side end to end (connect the provider without a key) and checks what the
- * caller then sees: a "Link ChatGPT" action and a Codex config pointed at the
- * Codex backend path rather than /v1.
+ * An OpenAI provider can sign in with one ChatGPT login instead of an API
+ * key. The record is the chatgpt_codex catalog entry (credential_kind
+ * user_oauth): no api_key, the upstream pinned to https://chatgpt.com, and an
+ * administrator links the login once for everyone the provider's policies
+ * cover. This walks the operator side (pick OpenAI, choose the ChatGPT login,
+ * connect, land on the link step, link later) and checks what a covered user
+ * then sees: a Codex config on the /backend-api/codex path and a note that the
+ * login still has to be linked.
  *
- * The device-code login itself is not driven here: approving it needs a real
- * ChatGPT account on OpenAI's page. The flow's polling and state handling are
- * covered by the unit tests next to useProviderLink.
+ * The device-code approval itself is not driven: it needs a real ChatGPT
+ * account on OpenAI's page, and the test environment may not reach OpenAI at
+ * all, so the link step is checked for appearing, not for its outcome. The
+ * flow's polling and states are covered by the unit tests next to
+ * useProviderLink.
  *
  * Skips on management builds whose catalog predates chatgpt_codex, the same
  * way the Kimi spec skips on a catalog without kimi_api.
@@ -34,7 +38,6 @@ import { generateRandomName } from "../helpers/utils";
 
 const AGENT_NETWORK_CONFIG_KEY = "netbird-test-agent-network";
 const CHATGPT_CATALOG_ID = "chatgpt_codex";
-const CHATGPT_CATALOG_NAME = "ChatGPT (Codex)";
 const PROVIDER_PREFIX = "e2e-chatgpt-";
 
 /**
@@ -85,7 +88,7 @@ async function newAgentNetworkPage(browser: Browser): Promise<{
 
 test.describe
   .serial("Agent Network ChatGPT provider @agent-network @test-build", () => {
-  test("connect ChatGPT without a key and see the link action", async ({
+  test("connect OpenAI with a ChatGPT login and link it later", async ({
     browser,
   }) => {
     const { page, close } = await newAgentNetworkPage(browser);
@@ -114,17 +117,18 @@ test.describe
         .getByRole("button", { name: "Connect Provider" })
         .first()
         .click({ force: true });
-      await page
-        .getByRole("button", { name: /OpenAI API/ })
-        .first()
-        .click({ force: true });
-      await page.getByPlaceholder("Search providers...").fill("chatgpt");
-      await page.getByText(CHATGPT_CATALOG_NAME).first().click({ force: true });
 
-      // No key field, and the upstream is pinned to the vendor host.
+      // OpenAI is the default pick; the ChatGPT login is its other sign-in
+      // method, not an entry of its own in the picker.
+      await page
+        .getByTestId("agent-network-provider-auth-login")
+        .click({ force: true });
+
+      // The shared-plan warning, no key field, and the upstream pinned to the
+      // vendor host.
       await expect(
         page.getByTestId("agent-network-provider-user-oauth"),
-      ).toBeVisible();
+      ).toContainText("shares one ChatGPT plan");
       await expect(
         page.getByTestId("agent-network-provider-api-key"),
       ).toHaveCount(0);
@@ -133,9 +137,7 @@ test.describe
       await expect(upstream).toHaveAttribute("readonly", "");
 
       const providerName = generateRandomName(PROVIDER_PREFIX);
-      await page
-        .locator(`input[value="${CHATGPT_CATALOG_NAME}"]`)
-        .fill(providerName);
+      await page.getByTestId("agent-network-provider-name").fill(providerName);
 
       await page.getByRole("tab", { name: "Models" }).click({ force: true });
       // Listing models needs a credential the provider doesn't have.
@@ -155,23 +157,41 @@ test.describe
           resp.request().method() === "POST",
         { timeout: 30_000 },
       );
+      const linkRequest = page.waitForRequest(
+        (req) =>
+          /\/agent-network\/providers\/[^/]+\/link$/.test(req.url()) &&
+          req.method() === "POST",
+        { timeout: 30_000 },
+      );
       await page
-        .getByRole("button", { name: "Connect Provider" })
-        .last()
+        .getByTestId("agent-network-provider-submit")
         .click({ force: true });
       const body = (await createRequest).postDataJSON() as Record<
         string,
         unknown
       >;
+      expect(body.provider_id).toBe("chatgpt_codex");
       expect(body, "no operator key is sent").not.toHaveProperty("api_key");
       expect(body.upstream_url).toBe("https://chatgpt.com");
 
       const created = await createResponse;
       expect([200, 201]).toContain(created.status());
       const createdProvider = (await created.json()) as { id: string };
-      await expect(page.getByText(providerName).first()).toBeVisible();
 
-      // ---- the caller's view ----
+      // ---- the link step follows in the same modal ----
+      expect((await linkRequest).url()).toContain(
+        `/agent-network/providers/${createdProvider.id}/link`,
+      );
+      const linkLater = page.getByTestId("agent-network-provider-link-close");
+      await expect(linkLater).toBeVisible();
+      // Leaving before the login is approved keeps the provider, not linked.
+      await linkLater.click({ force: true });
+
+      const row = page.locator("tr").filter({ hasText: providerName });
+      await expect(row.getByTestId("provider-login-not-linked")).toBeVisible();
+      await expect(row.getByRole("button", { name: "Link" })).toBeVisible();
+
+      // ---- the covered user's view ----
       const caller = await getCurrentUser(page);
       const grantGroup = await createGroup(page, `${PROVIDER_PREFIX}grant`);
       await updateUserAutoGroups(page, caller, [
@@ -186,15 +206,14 @@ test.describe
 
       await page.goto("/agent-network/connect");
 
-      await expect(
-        page.getByRole("button", { name: "Link ChatGPT" }),
-      ).toBeVisible({ timeout: 15_000 });
-
       // The only provider is Codex-only, so the page opens on Codex.
       await expect(
         page.getByText(/base_url = "https:\/\/[^"]+\/backend-api\/codex"/),
-      ).toBeVisible();
+      ).toBeVisible({ timeout: 15_000 });
       await expect(page.getByText("openai_base_url")).toHaveCount(0);
+      await expect(
+        page.getByTestId("connect-provider-login-missing"),
+      ).toContainText("administrator");
 
       await cleanupChatGPTFixtures(page);
     } finally {

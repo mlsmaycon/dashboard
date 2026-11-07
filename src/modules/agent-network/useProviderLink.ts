@@ -2,6 +2,7 @@
 
 import { ErrorResponse, useApiCall } from "@utils/api";
 import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useSWRConfig } from "swr";
 import { useEventCallback } from "@/hooks/useEventCallback";
 import {
   IDLE,
@@ -9,37 +10,42 @@ import {
   linkReducer,
   pollDelayMs,
 } from "@/modules/agent-network/subscriptionLink";
+import { useRefreshAgentConfig } from "@/modules/agent-network/useMyAgentNetworkSetup";
 
 const errorOf = (err: unknown) => {
   const e = (err ?? {}) as Partial<ErrorResponse>;
   return { code: e.code, message: e.message };
 };
 
-const linkPath = (providerId: string) =>
-  `/agent-network/providers/${providerId}/link`;
+const PROVIDERS_PATH = "/agent-network/providers";
+const linkSuffix = (providerId: string) => `/${providerId}/link`;
 
 /**
- * Runs the caller's device-code login for one user_oauth provider: start()
- * asks the server for a code, then the flow is polled every interval_seconds
- * until it is linked, expired or failed. Polling stops on a terminal state, on
- * cancel(), and when the component using the hook unmounts. onLinked runs once per
- * successful link, so the caller can refresh what shows the link state.
+ * Runs the device-code login that links a subscription to a user_oauth
+ * provider: start(providerId) asks the server for a code, then the flow is
+ * polled every interval_seconds until it is linked, expired or failed. The
+ * provider id is passed to start rather than to the hook, so a modal can link
+ * the provider it has only just created. Polling stops on a terminal state,
+ * on cancel(), and when the component using the hook unmounts. onLinked runs
+ * once per successful link, so the caller can refresh what shows the state.
  */
-export function useProviderLink(
-  providerId: string,
-  { onLinked }: { onLinked?: () => void } = {},
-) {
+export function useProviderLink({ onLinked }: { onLinked?: () => void } = {}) {
   const [state, dispatch] = useReducer(linkReducer, IDLE);
   // Errors are shown in the dialog, which knows what each one means here,
   // instead of the generic request-failed toast.
-  const api = useApiCall<LinkFlow>(linkPath(providerId), true);
-  const requestStart = useEventCallback(() => api.post({}));
-  const requestFlow = useEventCallback((id: string) => api.get(`/${id}`));
+  const api = useApiCall<LinkFlow>(PROVIDERS_PATH, true);
+  const requestStart = useEventCallback((providerId: string) =>
+    api.post({}, linkSuffix(providerId)),
+  );
+  const requestFlow = useEventCallback((providerId: string, flowId: string) =>
+    api.get(`${linkSuffix(providerId)}/${flowId}`),
+  );
   const notifyLinked = useEventCallback(() => onLinked?.());
 
   // Each start() owns one attempt. An answer for an older attempt, or one
   // arriving after unmount, is dropped rather than overwriting the current one.
   const attempt = useRef(0);
+  const target = useRef("");
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -48,18 +54,22 @@ export function useProviderLink(
     };
   }, []);
 
-  const start = useCallback(() => {
-    const current = ++attempt.current;
-    const live = () => mounted.current && attempt.current === current;
-    dispatch({ type: "start" });
-    requestStart()
-      .then(
-        (flow) => live() && dispatch({ type: "flow", flow, at: Date.now() }),
-      )
-      .catch(
-        (err) => live() && dispatch({ type: "start-error", ...errorOf(err) }),
-      );
-  }, [requestStart]);
+  const start = useCallback(
+    (providerId: string) => {
+      const current = ++attempt.current;
+      target.current = providerId;
+      const live = () => mounted.current && attempt.current === current;
+      dispatch({ type: "start" });
+      requestStart(providerId)
+        .then(
+          (flow) => live() && dispatch({ type: "flow", flow, at: Date.now() }),
+        )
+        .catch(
+          (err) => live() && dispatch({ type: "start-error", ...errorOf(err) }),
+        );
+    },
+    [requestStart],
+  );
 
   // The effect is the polling loop: every answer, "pending" again or a poll
   // that failed and is to be retried, is a new state object and schedules the
@@ -67,11 +77,12 @@ export function useProviderLink(
   useEffect(() => {
     if (state.phase !== "pending") return;
     const current = attempt.current;
+    const providerId = target.current;
     let cancelled = false;
     const live = () =>
       !cancelled && mounted.current && attempt.current === current;
     const timer = setTimeout(() => {
-      requestFlow(state.flow.id)
+      requestFlow(providerId, state.flow.id)
         .then(
           (flow) => live() && dispatch({ type: "flow", flow, at: Date.now() }),
         )
@@ -100,15 +111,31 @@ export function useProviderLink(
 }
 
 /**
- * Forgets the caller's own login for a provider. Resolves true once the
- * server confirms; a failure is reported by the shared request-failed toast.
+ * Forgets a provider's linked login. Resolves true once the server confirms;
+ * a failure is reported by the shared request-failed toast.
  */
-export function useProviderUnlink(providerId: string) {
-  const api = useApiCall<object>(linkPath(providerId));
-  return useEventCallback(() =>
+export function useProviderUnlink() {
+  const api = useApiCall<object>(PROVIDERS_PATH);
+  return useEventCallback((providerId: string) =>
     api
-      .del()
+      .del("", linkSuffix(providerId))
       .then(() => true)
       .catch(() => false),
+  );
+}
+
+/**
+ * Refetches everything that shows a provider's link state: the provider list
+ * on the admin pages and the agent config on the Connect Agent page.
+ */
+export function useRefreshLinkState() {
+  const { mutate } = useSWRConfig();
+  const refreshAgentConfig = useRefreshAgentConfig();
+  return useCallback(
+    () =>
+      Promise.all([mutate(PROVIDERS_PATH), refreshAgentConfig()]).then(
+        () => undefined,
+      ),
+    [mutate, refreshAgentConfig],
   );
 }

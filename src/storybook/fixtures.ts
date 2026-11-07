@@ -18,7 +18,8 @@ export {
 export {
   agentConfig,
   agentConfigWithChatGPT,
-  chatgptConfigProvider,
+  agentProviders,
+  chatgptProvidersByLoginState,
   linkFlow,
 } from "../../.storybook/mocks/fixtures/platform-agent-network";
 export {

@@ -20,7 +20,7 @@ export type APIMeProvider = {
   all_models_allowed: boolean;
   models: string[];
   credential_kind?: CredentialKind;
-  // The caller's own login, present only for user_oauth providers.
+  // The provider's linked login, present only for user_oauth providers.
   subscription_link?: SubscriptionLink;
 };
 

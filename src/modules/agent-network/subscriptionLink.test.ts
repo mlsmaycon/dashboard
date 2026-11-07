@@ -1,13 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  authMethodOf,
+  catalogIdFor,
   codexSubscriptionLines,
   IDLE,
   isCodexOnly,
+  isLoginAlternative,
   LinkFlow,
   linkReducer,
   LinkState,
   linkStatusOf,
+  loginAlternativeOf,
   minutesLeft,
+  pickerIdOf,
   pollDelayMs,
   userOAuthUpstreamUrl,
   usesUserOAuth,
@@ -50,10 +55,35 @@ describe("userOAuthUpstreamUrl", () => {
 
 describe("linkStatusOf", () => {
   it("reads the reported status, and not_linked when there is none", () => {
+    expect(linkStatusOf({ status: "needs_relink" })).toBe("needs_relink");
+    expect(linkStatusOf(undefined)).toBe("not_linked");
+  });
+});
+
+describe("sign-in method", () => {
+  it("reaches the ChatGPT login through the OpenAI entry", () => {
+    expect(loginAlternativeOf("openai_api")).toBe("chatgpt_codex");
+    expect(loginAlternativeOf("anthropic_api")).toBeUndefined();
+    expect(isLoginAlternative("chatgpt_codex"), "kept out of the picker").toBe(
+      true,
+    );
+    expect(isLoginAlternative("openai_api")).toBe(false);
+  });
+
+  it("shows a login record as its vendor with the login method", () => {
+    expect(pickerIdOf("chatgpt_codex")).toBe("openai_api");
+    expect(authMethodOf("chatgpt_codex")).toBe("login");
+    expect(pickerIdOf("anthropic_api")).toBe("anthropic_api");
+    expect(authMethodOf("openai_api")).toBe("api_key");
+  });
+
+  it("maps a vendor and method back to the record's catalog id", () => {
+    expect(catalogIdFor("openai_api", "login")).toBe("chatgpt_codex");
+    expect(catalogIdFor("openai_api", "api_key")).toBe("openai_api");
     expect(
-      linkStatusOf({ subscription_link: { status: "needs_relink" } }),
-    ).toBe("needs_relink");
-    expect(linkStatusOf({})).toBe("not_linked");
+      catalogIdFor("anthropic_api", "login"),
+      "a vendor without a login keeps its own entry",
+    ).toBe("anthropic_api");
   });
 });
 
@@ -144,6 +174,18 @@ describe("linkReducer", () => {
     expect(run(IDLE, { type: "flow", flow: flow("pending"), at: 2 })).toBe(
       IDLE,
     );
+  });
+
+  it("explains a start refused for lack of permission", () => {
+    const state = run(
+      IDLE,
+      { type: "start" },
+      { type: "start-error", code: 403, message: "forbidden" },
+    );
+    expect(state).toEqual({
+      phase: "unavailable",
+      message: "Linking a login needs permission to edit providers.",
+    });
   });
 
   it("explains a refused start", () => {

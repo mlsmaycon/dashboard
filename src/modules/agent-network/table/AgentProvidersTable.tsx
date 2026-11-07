@@ -21,6 +21,7 @@ import AIProviderModal from "@/modules/agent-network/AIProviderModal";
 import { useAIProviders } from "@/modules/agent-network/AIProvidersProvider";
 import { AIProvider } from "@/modules/agent-network/data/mockData";
 import AgentProviderActionCell from "@/modules/agent-network/table/AgentProviderActionCell";
+import ProviderLoginCell from "@/modules/agent-network/table/ProviderLoginCell";
 import { useProviderCatalog } from "@/modules/agent-network/useProviderCatalog";
 
 function NameCell({ provider }: { provider: AIProvider }) {
@@ -116,6 +117,18 @@ const columns: ColumnDef<AIProvider>[] = [
   },
 ];
 
+// Only shown when a provider signs in with a linked login (ChatGPT) rather
+// than an API key; it sits before the row actions.
+const loginColumn: ColumnDef<AIProvider> = {
+  id: "login",
+  accessorFn: (p) => p.subscriptionLink?.status ?? "",
+  enableSorting: false,
+  header: ({ column }) => (
+    <DataTableHeader column={column}>Login</DataTableHeader>
+  ),
+  cell: ({ row }) => <ProviderLoginCell provider={row.original} />,
+};
+
 type Props = {
   headingTarget?: HTMLHeadingElement | null;
 };
@@ -142,6 +155,15 @@ export default function AgentProvidersTable({
     [{ id: "name", desc: false }],
   );
 
+  const hasLogins = providers.some((p) => !!p.subscriptionLink);
+  const tableColumns = React.useMemo(
+    () =>
+      hasLogins
+        ? [...columns.slice(0, -1), loginColumn, ...columns.slice(-1)]
+        : columns,
+    [hasLogins],
+  );
+
   return (
     <>
       {editingProvider && (
@@ -159,7 +181,7 @@ export default function AgentProvidersTable({
         text={"Providers"}
         sorting={sorting}
         setSorting={setSorting}
-        columns={columns}
+        columns={tableColumns}
         data={providers}
         searchPlaceholder={"Search by name..."}
         onRowClick={

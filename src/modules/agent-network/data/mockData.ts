@@ -1,3 +1,5 @@
+import type { SubscriptionLink } from "@/modules/agent-network/subscriptionLink";
+
 // Mock data for the Agent Network section. No backend wired up yet.
 // All numbers, IDs, and text are static placeholders for click-through.
 
@@ -80,6 +82,9 @@ export type AIProvider = {
   // Disable identity metadata injection (caller user + authorizing group) on
   // upstream requests, e.g. AWS Bedrock cost-allocation. Off by default.
   metadataDisabled?: boolean;
+  // The linked subscription login of a user_oauth provider (ChatGPT login);
+  // absent for providers that use an API key.
+  subscriptionLink?: SubscriptionLink;
   status: AIProviderStatus;
   models: ProviderModel[];
   allowedGroups: string[];

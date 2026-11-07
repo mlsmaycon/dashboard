@@ -1,5 +1,6 @@
 "use client";
 
+import { Callout } from "@components/Callout";
 import Code from "@components/Code";
 import { Input } from "@components/Input";
 import { SelectDropdown } from "@components/select/SelectDropdown";
@@ -23,6 +24,7 @@ import {
 import {
   codexSubscriptionLines,
   isCodexOnly,
+  SubscriptionLinkStatus,
   subscriptionName,
 } from "@/modules/agent-network/subscriptionLink";
 
@@ -179,19 +181,26 @@ export type ConnectProvider = {
   catalogId: string;
   api: ConnectExample["api"];
   models: string[];
+  // The provider's linked login, for one that signs in with a subscription
+  // (ChatGPT) instead of an API key.
+  linkStatus?: SubscriptionLinkStatus;
 };
 
 // fromAccountProviders reads the account's providers (the onboarding step):
 // the Anthropic Messages API for Anthropic, Chat Completions for everything
 // else.
 export const fromAccountProviders = (
-  providers: Pick<AIProvider, "name" | "providerId" | "models">[],
+  providers: Pick<
+    AIProvider,
+    "name" | "providerId" | "models" | "subscriptionLink"
+  >[],
 ): ConnectProvider[] =>
   providers.map((p) => ({
     name: p.name,
     catalogId: p.providerId,
     api: p.providerId === "anthropic_api" ? "anthropic" : "openai",
     models: p.models.map((m) => m.id),
+    ...(p.subscriptionLink ? { linkStatus: p.subscriptionLink.status } : {}),
   }));
 
 // The Claude Code config each provider needs; providers missing here speak
@@ -397,9 +406,9 @@ export function AgentConnectTabs({
   // provider, and say so the way they do for a path-routed one.
   const codexOnlyNote = (
     <SmallParagraph>
-      {provider?.name} runs on your own{" "}
-      {subscriptionName(provider?.catalogId ?? "")} subscription, which only
-      Codex can use. Pick another provider above to configure this tool.
+      {provider?.name} signs in with a{" "}
+      {subscriptionName(provider?.catalogId ?? "")} login, which only Codex can
+      use. Pick another provider above to configure this tool.
     </SmallParagraph>
   );
   // Every tab but Claude Code needs a fixed request path, which Bedrock and
@@ -678,10 +687,27 @@ export function AgentConnectTabs({
                 <SmallParagraph className={"mt-3"}>
                   Use your user config: Codex ignores provider settings in a
                   project&apos;s <code className={"font-mono"}>.codex</code>{" "}
-                  folder. Requests are refused until you link your{" "}
-                  {subscriptionName(provider.catalogId)} subscription on the
-                  Connect Agent page.
+                  folder.
                 </SmallParagraph>
+                {provider.linkStatus && provider.linkStatus !== "linked" && (
+                  <Callout
+                    variant={"warning"}
+                    className={"mt-3"}
+                    data-testid={"connect-provider-login-missing"}
+                  >
+                    {provider.linkStatus === "needs_relink"
+                      ? `The ${subscriptionName(
+                          provider.catalogId,
+                        )} login for ${
+                          provider.name
+                        } stopped working. Requests are refused until an administrator links it again.`
+                      : `No ${subscriptionName(
+                          provider.catalogId,
+                        )} login is linked to ${
+                          provider.name
+                        } yet. Requests are refused until an administrator links one.`}
+                  </Callout>
+                )}
               </>
             ) : (
               <>

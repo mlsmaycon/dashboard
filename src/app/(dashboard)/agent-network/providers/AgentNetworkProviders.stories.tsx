@@ -2,6 +2,10 @@ import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import ProvidersPage from "@/app/(dashboard)/agent-network/providers/page";
 import DashboardLayout from "@/layouts/DashboardLayout";
 import {
+  agentProviders,
+  chatgptProvidersByLoginState,
+} from "@/storybook/fixtures";
+import {
   click,
   clickRole,
   clickTestId,
@@ -158,19 +162,63 @@ export const EditVLLM = editStory(
   "Self-hosted vLLM cluster in the Frankfurt datacenter (GPU rack 4)",
 );
 
-/* ChatGPT takes each user's own subscription: no key field, the upstream locked to chatgpt.com. */
-async function connectChatGPT() {
-  await pickProvider("ChatGPT", "chatgpt_codex");
-  await findText(/No API key needed/);
+/* OpenAI offers a ChatGPT login next to the API key: no key field, the upstream locked to chatgpt.com,
+   and a warning that everyone the policies cover shares the plan. */
+async function chooseChatGPTLogin() {
+  await openConnect();
+  await clickTestId("agent-network-provider-auth-login");
+  await findText(/shares one ChatGPT plan/);
   await settle();
 }
 
-export const ConnectModalChatGPT: Story = { play: connectChatGPT };
+export const ConnectModalChatGPTLogin: Story = { play: chooseChatGPTLogin };
 
 export const ConnectModalChatGPTModels: Story = {
   play: async () => {
-    await connectChatGPT();
+    await chooseChatGPTLogin();
     await clickTestId("agent-network-provider-models-tab");
+    await settle();
+  },
+};
+
+/* Connecting a ChatGPT-login provider moves straight on to linking its login. */
+export const ConnectModalChatGPTLinkPending: Story = {
+  play: async () => {
+    await chooseChatGPTLogin();
+    await clickTestId("agent-network-provider-continue");
+    await clickTestId("agent-network-provider-submit");
+    await findText("WDJB-MJHT");
+    await settle();
+  },
+};
+
+export const EditChatGPT = editStory("ChatGPT team plan");
+
+/* The Login column, one ChatGPT-login provider per state. */
+const loginStates = {
+  api: {
+    "GET /agent-network/providers": [
+      ...agentProviders.filter((p) => p.id !== "anp-chatgpt"),
+      ...chatgptProvidersByLoginState,
+    ],
+  },
+};
+
+export const LoginStates: Story = {
+  parameters: loginStates,
+  play: async () => {
+    await findText("ChatGPT support");
+    await settle();
+  },
+};
+
+export const LoginLinkDialog: Story = {
+  parameters: loginStates,
+  play: async () => {
+    await findText("ChatGPT research");
+    await clickRole("button", /^Link$/);
+    await dialog();
+    await findText("WDJB-MJHT");
     await settle();
   },
 };

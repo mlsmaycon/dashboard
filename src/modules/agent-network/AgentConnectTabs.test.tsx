@@ -322,6 +322,38 @@ describe("AgentConnectTabs", () => {
       expect(screen.getByText(/which only\s+Codex can use/)).toBeTruthy();
     });
 
+    it("says an administrator has to link the login before requests work", () => {
+      render(
+        <AgentConnectTabs
+          endpoint={ENDPOINT}
+          providers={[{ ...chatgpt, linkStatus: "not_linked" }]}
+        />,
+      );
+      expect(
+        screen.getByTestId("connect-provider-login-missing").textContent,
+      ).toMatch(/until an administrator links one/);
+
+      cleanup();
+      render(
+        <AgentConnectTabs
+          endpoint={ENDPOINT}
+          providers={[{ ...chatgpt, linkStatus: "needs_relink" }]}
+        />,
+      );
+      expect(
+        screen.getByTestId("connect-provider-login-missing").textContent,
+      ).toMatch(/until an administrator links it again/);
+
+      cleanup();
+      render(
+        <AgentConnectTabs
+          endpoint={ENDPOINT}
+          providers={[{ ...chatgpt, linkStatus: "linked" }]}
+        />,
+      );
+      expect(screen.queryByTestId("connect-provider-login-missing")).toBeNull();
+    });
+
     it("picks a keyed provider first and keeps /v1 for its Codex config", () => {
       render(
         <AgentConnectTabs

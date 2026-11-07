@@ -48,8 +48,8 @@ afterEach(() => {
 });
 
 const startLink = async (onLinked = vi.fn()) => {
-  const hook = renderHook(() => useProviderLink("anp-chatgpt", { onLinked }));
-  act(() => hook.result.current.start());
+  const hook = renderHook(() => useProviderLink({ onLinked }));
+  act(() => hook.result.current.start("anp-chatgpt"));
   await flush();
   return { ...hook, onLinked };
 };
@@ -63,12 +63,12 @@ describe("useProviderLink", () => {
 
     const { result, onLinked } = await startLink();
 
-    expect(urls[0]).toBe("/agent-network/providers/anp-chatgpt/link");
-    expect(post).toHaveBeenCalledTimes(1);
+    expect(urls[0]).toBe("/agent-network/providers");
+    expect(post).toHaveBeenCalledWith({}, "/anp-chatgpt/link");
     expect(result.current.state.phase).toBe("pending");
 
     await tick(5000);
-    expect(get).toHaveBeenCalledWith("/flow-1");
+    expect(get).toHaveBeenCalledWith("/anp-chatgpt/link/flow-1");
     expect(result.current.state.phase).toBe("pending");
 
     await tick(5000);
@@ -187,22 +187,22 @@ describe("useProviderLink", () => {
     await tick(5000);
     expect(result.current.state.phase).toBe("expired");
 
-    act(() => result.current.start());
+    act(() => result.current.start("anp-chatgpt"));
     await flush();
     expect(result.current.state.phase).toBe("pending");
     await tick(5000);
-    expect(get).toHaveBeenLastCalledWith("/flow-2");
+    expect(get).toHaveBeenLastCalledWith("/anp-chatgpt/link/flow-2");
     expect(result.current.state.phase).toBe("linked");
   });
 });
 
 describe("useProviderUnlink", () => {
-  it("deletes the caller's own link and reports the outcome", async () => {
+  it("deletes the provider's login and reports the outcome", async () => {
     del.mockResolvedValueOnce({}).mockRejectedValueOnce({ code: 500 });
-    const { result } = renderHook(() => useProviderUnlink("anp-chatgpt"));
+    const { result } = renderHook(() => useProviderUnlink());
 
-    expect(urls[0]).toBe("/agent-network/providers/anp-chatgpt/link");
-    await expect(result.current()).resolves.toBe(true);
-    await expect(result.current()).resolves.toBe(false);
+    await expect(result.current("anp-chatgpt")).resolves.toBe(true);
+    expect(del).toHaveBeenCalledWith("", "/anp-chatgpt/link");
+    await expect(result.current("anp-chatgpt")).resolves.toBe(false);
   });
 });

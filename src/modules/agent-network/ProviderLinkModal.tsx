@@ -37,13 +37,13 @@ type Props = {
   onRetry: () => void;
   state: LinkState;
   catalogId: string;
-  // Plan the server reported once the link landed, read from agent-config.
+  // Plan the server reported once the link landed, read from the provider.
   planType?: string;
 };
 
-// ProviderLinkModal walks the caller through a device-code login: open the
-// vendor page, type the code, approve. The flow itself lives in
-// useProviderLink; this only renders the phase it is in.
+// ProviderLinkModal links a subscription login to an existing provider, for
+// the providers table. The provider modal shows the same header and body as
+// the step after creating one.
 export default function ProviderLinkModal({
   open,
   onClose,
@@ -52,7 +52,6 @@ export default function ProviderLinkModal({
   catalogId,
   planType,
 }: Readonly<Props>) {
-  const name = subscriptionName(catalogId);
   const done = state.phase === "linked";
 
   return (
@@ -61,19 +60,12 @@ export default function ProviderLinkModal({
         maxWidthClass={"max-w-lg"}
         data-testid={"agent-network-provider-link-modal"}
       >
-        <ModalHeader
-          icon={
-            <AIProviderLogo providerId={catalogId as AIProviderId} size={18} />
-          }
-          title={`Link your ${name} subscription`}
-          description={`Requests you send through NetBird to this provider will run on your own ${name} plan.`}
-          color={"netbird"}
-        />
+        <ProviderLinkHeader catalogId={catalogId} />
 
         <div className={"px-8 pb-6"}>
-          <LinkBody
+          <ProviderLinkBody
             state={state}
-            name={name}
+            catalogId={catalogId}
             planType={planType}
             onRetry={onRetry}
           />
@@ -93,17 +85,33 @@ export default function ProviderLinkModal({
   );
 }
 
-function LinkBody({
+export function ProviderLinkHeader({ catalogId }: { catalogId: string }) {
+  const name = subscriptionName(catalogId);
+  return (
+    <ModalHeader
+      icon={<AIProviderLogo providerId={catalogId as AIProviderId} size={18} />}
+      title={`Link a ${name} login`}
+      description={`Sign in with the ${name} account whose plan this provider should use.`}
+      color={"netbird"}
+    />
+  );
+}
+
+// ProviderLinkBody walks the operator through a device-code login: open the
+// vendor page, type the code, approve. The flow itself lives in
+// useProviderLink; this only renders the phase it is in.
+export function ProviderLinkBody({
   state,
-  name,
+  catalogId,
   planType,
   onRetry,
 }: {
   state: LinkState;
-  name: string;
+  catalogId: string;
   planType?: string;
   onRetry: () => void;
 }) {
+  const name = subscriptionName(catalogId);
   switch (state.phase) {
     case "idle":
     case "starting":
@@ -133,8 +141,8 @@ function LinkBody({
             />
           }
         >
-          Your {name} {plan ? `${plan} ` : ""}subscription is linked. Requests
-          you send through NetBird to this provider now use it.
+          The {name} {plan ? `${plan} ` : ""}plan is linked. Every request this
+          provider&apos;s policies allow now uses it.
         </Callout>
       );
     }

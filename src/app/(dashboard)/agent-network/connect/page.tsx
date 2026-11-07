@@ -32,6 +32,7 @@ export default function ConnectAgentPage() {
     catalogId: p.catalog_id,
     api: p.api_flavor === "anthropic" ? "anthropic" : "openai",
     models: p.models,
+    ...(p.subscription_link ? { linkStatus: p.subscription_link.status } : {}),
   }));
 
   return (

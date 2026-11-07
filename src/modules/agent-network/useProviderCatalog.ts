@@ -57,8 +57,8 @@ export type CatalogProvider = {
   // — show every cache field for those.
   pricing_surfaces?: string[];
   // Where the upstream credential comes from. "user_oauth" entries take no
-  // operator key: each user links their own subscription login, as
-  // subscription_login describes. Absent on servers that predate it, which
+  // operator key: an administrator links one subscription login to the
+  // provider, as subscription_login describes. Absent on servers that predate it, which
   // means an operator key.
   credential_kind?: CredentialKind;
   subscription_login?: CatalogSubscriptionLogin;
