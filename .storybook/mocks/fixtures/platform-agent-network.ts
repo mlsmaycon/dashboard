@@ -40,6 +40,23 @@ const catalog = [
       model("o3", "o3", 0.002, 0.008),
     ],
   },
+  /* The one user_oauth entry: no operator key, each user links their own ChatGPT plan. */
+  {
+    id: "chatgpt_codex",
+    name: "ChatGPT (Codex)",
+    description: "Codex on each user's own ChatGPT plan",
+    default_host: "chatgpt.com",
+    auth_header_template: "Authorization: Bearer {key}",
+    default_content_type: "application/json",
+    brand_color: "#10A37F",
+    kind: "provider",
+    credential_kind: "user_oauth",
+    subscription_login: {
+      flow: "device",
+      verification_uri: "https://auth.openai.com/codex/device",
+    },
+    models: [],
+  },
   {
     id: "anthropic_api",
     name: "Anthropic",
@@ -488,28 +505,71 @@ export const agentConfig = {
   endpoint: "https://acme.ai.eu.proxy.netbird.io",
   providers: [
     {
+      id: "anp-openai",
       name: "OpenAI Production",
       catalog_id: "openai_api",
       api_flavor: "openai",
       all_models_allowed: false,
       models: ["gpt-4o", "gpt-4o-mini"],
+      credential_kind: "static_key",
     },
     {
+      id: "anp-anthropic",
       name: "Anthropic Claude",
       catalog_id: "anthropic_api",
       api_flavor: "anthropic",
       all_models_allowed: false,
       models: ["claude-sonnet-4-5"],
+      credential_kind: "static_key",
     },
     {
+      id: "anp-litellm",
       name: "LiteLLM Gateway",
       catalog_id: "litellm_proxy",
       api_flavor: "openai",
       all_models_allowed: true,
       models: [],
+      credential_kind: "static_key",
     },
   ],
 };
+
+type SubscriptionLinkStatus = "linked" | "not_linked" | "needs_relink";
+
+/* A ChatGPT provider as agent-config reports it, in the caller's given link state. */
+export const chatgptConfigProvider = (status: SubscriptionLinkStatus) => ({
+  id: "anp-chatgpt",
+  name: "ChatGPT",
+  catalog_id: "chatgpt_codex",
+  api_flavor: "openai",
+  all_models_allowed: true,
+  models: [],
+  credential_kind: "user_oauth",
+  subscription_link:
+    status === "linked"
+      ? { status, plan_type: "plus", linked_at: "2026-10-01T08:00:00Z" }
+      : status === "needs_relink"
+      ? { status, plan_type: "pro", linked_at: "2026-08-12T08:00:00Z" }
+      : { status },
+});
+
+/* The account's agent config with a ChatGPT provider next to the keyed ones. */
+export const agentConfigWithChatGPT = (status: SubscriptionLinkStatus) => ({
+  ...agentConfig,
+  providers: [...agentConfig.providers, chatgptConfigProvider(status)],
+});
+
+/* A device-code login as POST/GET .../link answer it. The code expires 15 minutes after the request,
+   so the dialog reads the same whenever it is captured. */
+export const linkFlow =
+  (status: "pending" | "linked" | "expired" | "failed") => () => ({
+    id: "flow-1",
+    status,
+    user_code: "WDJB-MJHT",
+    verification_uri: "https://auth.openai.com/codex/device",
+    expires_at: new Date(Date.now() + 15 * 60_000).toISOString(),
+    interval_seconds: 5,
+  });
 
 export const agentConfigUnconfigured = {
   configured: false,
@@ -716,4 +776,8 @@ export const agentNetworkFixtures: Record<string, Handler> = {
   },
   "GET /agent-network/access-logs": paginated(accessLogs),
   "GET /agent-network/access-log-sessions": paginated(sessions),
+  // The caller's own subscription link: the login stays pending until a story says otherwise.
+  "POST /agent-network/providers/:id/link": linkFlow("pending"),
+  "GET /agent-network/providers/:id/link/:flowId": linkFlow("pending"),
+  "DELETE /agent-network/providers/:id/link": {},
 };

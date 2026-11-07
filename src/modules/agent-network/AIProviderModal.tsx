@@ -61,6 +61,11 @@ import {
   AIProviderId,
   ProviderModel,
 } from "@/modules/agent-network/data/mockData";
+import {
+  subscriptionName,
+  userOAuthUpstreamUrl,
+  usesUserOAuth,
+} from "@/modules/agent-network/subscriptionLink";
 import { useDiscoveredModels } from "@/modules/agent-network/useDiscoveredModels";
 import { useProviderCatalog } from "@/modules/agent-network/useProviderCatalog";
 
@@ -334,6 +339,11 @@ export default function AIProviderModal({
   // Custom-kind providers (the generic "Custom" entry and named self-hosted
   // ones like vLLM) share the self-hosted extras, e.g. Skip TLS verification.
   const isCustomKind = catalog?.kind === "custom";
+  // A user_oauth entry has no operator key: each user links their own login,
+  // and the server pins the upstream to the vendor host.
+  const userOAuth = usesUserOAuth(catalog);
+  const pinnedUpstreamUrl =
+    userOAuth && catalog ? userOAuthUpstreamUrl(catalog) : undefined;
   const customizableHeaderPair =
     catalog?.identity_injection?.header_pair?.customizable === true;
   const customizableJsonMetadata =
@@ -521,7 +531,7 @@ export default function AIProviderModal({
     !!providerId &&
     name.trim().length > 0 &&
     /^https?:\/\/[^\s]+$/i.test(upstreamUrl.trim()) &&
-    apiKey.trim().length >= 4 &&
+    (userOAuth || apiKey.trim().length >= 4) &&
     // First-create bootstraps the settings row and needs a cluster pick;
     // once settings is bootstrapped no cluster is involved.
     (settingsBootstrapped || bootstrapCluster.trim().length > 0);
@@ -588,11 +598,12 @@ export default function AIProviderModal({
           identityHeaderGroups: identityHeaderGroups.trim(),
         }
       : {};
+    const submittedUpstreamUrl = pinnedUpstreamUrl ?? upstreamUrl;
     const input: ProviderConnectInput = {
       providerId,
       name,
-      upstreamUrl,
-      apiKey,
+      upstreamUrl: submittedUpstreamUrl,
+      apiKey: userOAuth ? "" : apiKey,
       extraValues: sanitizedExtraValues,
       ...identityOverrides,
       skipTlsVerification: isCustomKind ? skipTlsVerification : false,
@@ -613,14 +624,16 @@ export default function AIProviderModal({
         const saved = await updateProvider(provider.id, {
           providerId,
           name,
-          upstreamUrl,
+          upstreamUrl: submittedUpstreamUrl,
           models: submittedModels,
           extraValues: sanitizedExtraValues,
           ...identityOverrides,
           skipTlsVerification: isCustomKind ? skipTlsVerification : false,
           metadataDisabled,
           // Only forward the API key when the user actually rotated it
-          ...(apiKey && apiKey.trim() !== MASKED_API_KEY ? { apiKey } : {}),
+          ...(!userOAuth && apiKey && apiKey.trim() !== MASKED_API_KEY
+            ? { apiKey }
+            : {}),
         });
         // The url and credential are checked against the vendor before the
         // change is stored, so a save can be refused for a reason the operator
@@ -1043,13 +1056,14 @@ export default function AIProviderModal({
                 <Input
                   {...NO_PASSWORD_MANAGER}
                   data-testid={"agent-network-provider-upstream-url"}
-                  value={upstreamUrl}
+                  value={pinnedUpstreamUrl ?? upstreamUrl}
+                  readOnly={userOAuth}
                   onChange={(e) => setUpstreamUrl(e.target.value)}
                   placeholder={upstreamUrlPlaceholder(providerId)}
                 />
               </div>
 
-              {isCustomKind && (
+              {isCustomKind && !userOAuth && (
                 <FancyToggleSwitch
                   value={skipTlsVerification}
                   onChange={setSkipTlsVerification}
@@ -1086,7 +1100,17 @@ export default function AIProviderModal({
                 />
               )}
 
-              {providerId === "vertex_ai_api" ? (
+              {userOAuth ? (
+                <Callout
+                  variant={"info"}
+                  data-testid={"agent-network-provider-user-oauth"}
+                >
+                  No API key needed. Each user links their own{" "}
+                  {subscriptionName(providerId)} subscription from the{" "}
+                  <strong>Connect Agent</strong> page, and their requests are
+                  billed to that plan.
+                </Callout>
+              ) : providerId === "vertex_ai_api" ? (
                 <FormRow
                   label={
                     <>
@@ -1698,44 +1722,58 @@ export default function AIProviderModal({
               <div>
                 <Label>Models</Label>
                 <div data-testid={"agent-network-provider-models-help"}>
-                  <HelpText margin={false}>
-                    Models exposed through this endpoint, with the per-1k
-                    input/output prices used for cost tracking. Empty = all
-                    catalog models allowed at catalog prices. Cache rates left
-                    empty fall back to NetBird&apos;s defaults for the model; 0
-                    bills cached tokens at the input rate.
+                  {userOAuth ? (
+                    <HelpText margin={false}>
+                      Models users may ask for through this endpoint. Empty =
+                      any model their plan includes. Usage is billed to each
+                      user&apos;s plan, so the per-1k prices only feed
+                      NetBird&apos;s cost estimates.
+                    </HelpText>
+                  ) : (
+                    <HelpText margin={false}>
+                      Models exposed through this endpoint, with the per-1k
+                      input/output prices used for cost tracking. Empty = all
+                      catalog models allowed at catalog prices. Cache rates left
+                      empty fall back to NetBird&apos;s defaults for the model;
+                      0 bills cached tokens at the input rate.
+                    </HelpText>
+                  )}
+                </div>
+              </div>
+
+              {/* Listing models needs a credential, and a user_oauth
+                  provider has none of its own to list with. */}
+              {!userOAuth && (
+                <div className={"flex flex-col gap-1.5"}>
+                  <div className={"flex items-center gap-3"}>
+                    <Button
+                      variant={"secondary"}
+                      size={"xs"}
+                      disabled={discoveryInFlight || !canDiscoverModels}
+                      onClick={loadModelsFromProvider}
+                    >
+                      {discoveryInFlight ? (
+                        <Loader2 size={13} className={"animate-spin"} />
+                      ) : (
+                        <RefreshCwIcon size={13} />
+                      )}
+                      Load models from provider
+                    </Button>
+                  </div>
+
+                  {/* Always rendered, space reserved, so nothing below moves
+                      when a load reports back. */}
+                  <HelpText
+                    className={cn(
+                      "!mb-0",
+                      discovered.error &&
+                        "text-orange-500 dark:text-orange-400",
+                    )}
+                  >
+                    {discoveryMessage ?? <>&nbsp;</>}
                   </HelpText>
                 </div>
-              </div>
-
-              <div className={"flex flex-col gap-1.5"}>
-                <div className={"flex items-center gap-3"}>
-                  <Button
-                    variant={"secondary"}
-                    size={"xs"}
-                    disabled={discoveryInFlight || !canDiscoverModels}
-                    onClick={loadModelsFromProvider}
-                  >
-                    {discoveryInFlight ? (
-                      <Loader2 size={13} className={"animate-spin"} />
-                    ) : (
-                      <RefreshCwIcon size={13} />
-                    )}
-                    Load models from provider
-                  </Button>
-                </div>
-
-                {/* Always rendered, space reserved, so nothing below moves
-                    when a load reports back. */}
-                <HelpText
-                  className={cn(
-                    "!mb-0",
-                    discovered.error && "text-orange-500 dark:text-orange-400",
-                  )}
-                >
-                  {discoveryMessage ?? <>&nbsp;</>}
-                </HelpText>
-              </div>
+              )}
 
               {unpricedModelIds.size > 0 && (
                 // A callout rather than a line of help text: this is the one

@@ -16,6 +16,12 @@ export {
   USER,
 } from "../../.storybook/mocks/fixtures/ids";
 export {
+  agentConfig,
+  agentConfigWithChatGPT,
+  chatgptConfigProvider,
+  linkFlow,
+} from "../../.storybook/mocks/fixtures/platform-agent-network";
+export {
   distributorInfo,
   edr,
   eventStreams,

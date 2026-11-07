@@ -6,6 +6,7 @@
 // management server and is fetched via useProviderCatalog().
 export type AIProviderId =
   | "openai_api"
+  | "chatgpt_codex"
   | "anthropic_api"
   | "azure_openai_api"
   | "bedrock_api"

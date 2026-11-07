@@ -20,6 +20,11 @@ import {
   AIProvider,
   AIProviderId,
 } from "@/modules/agent-network/data/mockData";
+import {
+  codexSubscriptionLines,
+  isCodexOnly,
+  subscriptionName,
+} from "@/modules/agent-network/subscriptionLink";
 
 // Same gray-to-netbird treatment the install-peer modal gives its OS tabs.
 const TAB_ICON =
@@ -354,12 +359,18 @@ export function AgentConnectTabs({
   const [pick, setPick] = React.useState<{ name?: string; model?: string }>({});
   const routedByPath = (p: ConnectProvider) =>
     PATH_ROUTED.includes(p.catalogId as AIProviderId);
+  // A Codex-only provider (a ChatGPT subscription) is picked last, since
+  // every other tab has nothing to show for it.
   const provider =
     providers.find((p) => p.name === pick.name) ??
     providers.find((p) => p.api === "anthropic" && !routedByPath(p)) ??
+    providers.find((p) => !routedByPath(p) && !isCodexOnly(p.catalogId)) ??
     providers.find((p) => !routedByPath(p)) ??
     providers[0];
   const pathRouted = !!provider && routedByPath(provider);
+  const codexOnly = isCodexOnly(provider?.catalogId);
+  // With a Codex-only provider picked, the Codex tab is the one that works.
+  const openTab = codexOnly ? "codex" : defaultTab;
   const api = provider?.api ?? DEFAULT_EXAMPLE.api;
   // chosenModel is unset when the provider lists no models and none was
   // typed; tools that pick their own model then keep doing so.
@@ -382,6 +393,15 @@ export function AgentConnectTabs({
     (provider?.catalogId === "kimi_api" && chosenModel) || "kimi-k3";
   // Codex speaks the OpenAI shape only, so it takes no model from another.
   const codexModel = api === "openai" ? model : undefined;
+  // Tabs for tools other than Codex have nothing to offer a Codex-only
+  // provider, and say so the way they do for a path-routed one.
+  const codexOnlyNote = (
+    <SmallParagraph>
+      {provider?.name} runs on your own{" "}
+      {subscriptionName(provider?.catalogId ?? "")} subscription, which only
+      Codex can use. Pick another provider above to configure this tool.
+    </SmallParagraph>
+  );
   // Every tab but Claude Code needs a fixed request path, which Bedrock and
   // Vertex don't have.
   const pathNote = (
@@ -429,7 +449,7 @@ export function AgentConnectTabs({
         </div>
       )}
 
-      <Tabs key={defaultTab} defaultValue={defaultTab}>
+      <Tabs key={openTab} defaultValue={openTab}>
         <TabsList justify={"start"} className={listClassName}>
           <TabsTrigger value={"claude-code"}>
             <ClaudeIcon className={TAB_ICON} size={14} />
@@ -474,7 +494,9 @@ export function AgentConnectTabs({
 
         <TabsContent value={"claude-code"}>
           <div className={contentClassName}>
-            {!claudeProvider && (
+            {codexOnly && codexOnlyNote}
+
+            {!codexOnly && !claudeProvider && (
               <SmallParagraph>
                 Claude Code speaks the Anthropic Messages API, which{" "}
                 {provider?.name} doesn&apos;t. Pick an Anthropic, Vertex AI,
@@ -639,6 +661,28 @@ export function AgentConnectTabs({
           <div className={contentClassName}>
             {pathRouted ? (
               pathNote
+            ) : codexOnly && provider ? (
+              <>
+                <Snippet
+                  title={
+                    <>
+                      Add to <ConfigPath path={"~/.codex/config.toml"} />
+                    </>
+                  }
+                  lines={codexSubscriptionLines(
+                    provider.catalogId,
+                    baseUrl,
+                    chosenModel,
+                  )}
+                />
+                <SmallParagraph className={"mt-3"}>
+                  Use your user config: Codex ignores provider settings in a
+                  project&apos;s <code className={"font-mono"}>.codex</code>{" "}
+                  folder. Requests are refused until you link your{" "}
+                  {subscriptionName(provider.catalogId)} subscription on the
+                  Connect Agent page.
+                </SmallParagraph>
+              </>
             ) : (
               <>
                 <Snippet
@@ -666,6 +710,8 @@ export function AgentConnectTabs({
           <div className={contentClassName}>
             {pathRouted ? (
               pathNote
+            ) : codexOnly ? (
+              codexOnlyNote
             ) : (
               <>
                 <Snippet
@@ -686,6 +732,8 @@ export function AgentConnectTabs({
           <div className={cn(contentClassName, "flex flex-col gap-3")}>
             {pathRouted ? (
               pathNote
+            ) : codexOnly ? (
+              codexOnlyNote
             ) : (
               <>
                 <Snippet
@@ -758,6 +806,8 @@ export function AgentConnectTabs({
           <div className={contentClassName}>
             {pathRouted ? (
               pathNote
+            ) : codexOnly ? (
+              codexOnlyNote
             ) : (
               <>
                 <Snippet lines={sdkLines(picked, baseUrl)} />
@@ -770,6 +820,8 @@ export function AgentConnectTabs({
           <div className={contentClassName}>
             {pathRouted ? (
               pathNote
+            ) : codexOnly ? (
+              codexOnlyNote
             ) : (
               <>
                 <Snippet {...curlSnippet(picked, baseUrl)} />

@@ -283,4 +283,63 @@ describe("AgentConnectTabs", () => {
     expect(shownLines()).toEqual([]);
     expect(screen.getByText(/speaks the Anthropic Messages API/)).toBeTruthy();
   });
+  describe("with a ChatGPT subscription provider", () => {
+    const chatgpt: ConnectProvider = {
+      name: "ChatGPT",
+      catalogId: "chatgpt_codex",
+      api: "openai",
+      models: [],
+    };
+
+    it("opens on Codex, pointed at the Codex backend path", () => {
+      render(<AgentConnectTabs endpoint={ENDPOINT} providers={[chatgpt]} />);
+
+      expect(
+        screen.getByRole("tab", { name: "Codex", selected: true }),
+      ).toBeTruthy();
+      expect(shownLines()).toEqual([
+        `model_provider = "netbird"`,
+        ``,
+        `[model_providers.netbird]`,
+        `name = "NetBird"`,
+        `base_url = "https://${ENDPOINT}/backend-api/codex"`,
+        `wire_api = "responses"`,
+      ]);
+      expect(screen.getByText(/Codex ignores provider settings/)).toBeTruthy();
+    });
+
+    it("tells every other tool it can't use the subscription", () => {
+      render(
+        <AgentConnectTabs
+          endpoint={ENDPOINT}
+          defaultTab={"curl"}
+          providers={[chatgpt]}
+        />,
+      );
+
+      fireEvent.mouseDown(screen.getByRole("tab", { name: "cURL" }));
+      expect(shownLines()).toEqual([]);
+      expect(screen.getByText(/which only\s+Codex can use/)).toBeTruthy();
+    });
+
+    it("picks a keyed provider first and keeps /v1 for its Codex config", () => {
+      render(
+        <AgentConnectTabs
+          endpoint={ENDPOINT}
+          defaultTab={"codex"}
+          providers={[
+            chatgpt,
+            {
+              name: "OpenAI",
+              catalogId: "openai_api",
+              api: "openai",
+              models: ["gpt-4o"],
+            },
+          ]}
+        />,
+      );
+
+      expect(shownLines()).toContain(`base_url = "https://${ENDPOINT}/v1"`);
+    });
+  });
 });

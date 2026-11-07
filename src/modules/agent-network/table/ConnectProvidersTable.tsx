@@ -16,6 +16,8 @@ import { usePermissions } from "@/contexts/PermissionsProvider";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 import AIProviderLogo from "@/modules/agent-network/AIProviderLogo";
 import { AIProviderId } from "@/modules/agent-network/data/mockData";
+import { usesUserOAuth } from "@/modules/agent-network/subscriptionLink";
+import ConnectSubscriptionCell from "@/modules/agent-network/table/ConnectSubscriptionCell";
 import { APIMeProvider } from "@/modules/agent-network/useMyAgentNetworkSetup";
 
 function NameCell({ provider }: { provider: APIMeProvider }) {
@@ -131,6 +133,18 @@ const columns: ColumnDef<APIMeProvider>[] = [
   },
 ];
 
+// Only shown when a provider takes the caller's own subscription: everywhere
+// else there is nothing for the caller to link.
+const subscriptionColumn: ColumnDef<APIMeProvider> = {
+  id: "subscription",
+  accessorFn: (p) => p.subscription_link?.status ?? "",
+  enableSorting: false,
+  header: ({ column }) => (
+    <DataTableHeader column={column}>Subscription</DataTableHeader>
+  ),
+  cell: ({ row }) => <ConnectSubscriptionCell provider={row.original} />,
+};
+
 type Props = {
   providers: APIMeProvider[];
 };
@@ -138,7 +152,8 @@ type Props = {
 // ConnectProvidersTable lists what the caller's own policies let them reach.
 // Same DataTable the admin providers table uses, minus the write flows: the
 // rows come from the caller-scoped agent-config answer, so there is nothing
-// here to connect, edit, or delete.
+// here to connect, edit, or delete. The one thing a caller can change is
+// their own subscription link on a user_oauth provider.
 export default function ConnectProvidersTable({ providers }: Readonly<Props>) {
   const path = usePathname();
   const router = useRouter();
@@ -151,6 +166,12 @@ export default function ConnectProvidersTable({ providers }: Readonly<Props>) {
   // instead of being told to ask someone else.
   const { permission } = usePermissions();
   const canManagePolicies = !!permission?.["agent_network.policies"]?.update;
+
+  const hasSubscriptions = providers.some(usesUserOAuth);
+  const tableColumns = React.useMemo(
+    () => (hasSubscriptions ? [...columns, subscriptionColumn] : columns),
+    [hasSubscriptions],
+  );
 
   return (
     <DataTable
@@ -166,7 +187,7 @@ export default function ConnectProvidersTable({ providers }: Readonly<Props>) {
       text={"Providers"}
       sorting={sorting}
       setSorting={setSorting}
-      columns={columns}
+      columns={tableColumns}
       data={providers}
       showSearchAndFilters={false}
       initialPageSize={25}

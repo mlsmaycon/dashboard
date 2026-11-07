@@ -8,7 +8,11 @@ vi.mock("@components/Notification", () => ({
   notify: (props: unknown) => notify(props),
 }));
 vi.mock("@utils/api", () => ({
-  default: () => ({ data: [], isLoading: false, mutate: vi.fn() }),
+  default: () => ({
+    data: [],
+    isLoading: false,
+    mutate: () => Promise.resolve(),
+  }),
   useApiCall: () => ({ post }),
 }));
 vi.mock("@/contexts/PermissionsProvider", () => ({
@@ -91,5 +95,49 @@ describe("addPolicy", () => {
         description: "source group not found",
       }),
     );
+  });
+});
+
+describe("addProvider", () => {
+  const provider = {
+    providerId: "chatgpt_codex" as const,
+    name: "ChatGPT (Codex)",
+    upstreamUrl: "https://chatgpt.com",
+    models: [],
+    enabled: true,
+  };
+
+  beforeEach(() => {
+    post.mockResolvedValue({
+      id: "anp-chatgpt",
+      provider_id: "chatgpt_codex",
+      name: "ChatGPT (Codex)",
+      upstream_url: "https://chatgpt.com",
+      models: [],
+      enabled: true,
+      created_at: "",
+      updated_at: "",
+    });
+  });
+
+  it("leaves api_key out when there is no operator key", async () => {
+    const { addProvider } = renderContext();
+    await act(() => addProvider({ ...provider, apiKey: "" }));
+
+    const body = post.mock.calls[0][0];
+    expect(body.upstream_url).toBe("https://chatgpt.com");
+    expect(
+      JSON.parse(JSON.stringify(body)),
+      "api_key is absent from the JSON body",
+    ).not.toHaveProperty("api_key");
+  });
+
+  it("sends the operator key when there is one", async () => {
+    const { addProvider } = renderContext();
+    await act(() =>
+      addProvider({ ...provider, providerId: "openai_api", apiKey: "sk-1" }),
+    );
+
+    expect(post.mock.calls[0][0].api_key).toBe("sk-1");
   });
 });

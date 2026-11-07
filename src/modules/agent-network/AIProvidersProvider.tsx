@@ -310,7 +310,9 @@ function toCreateRequest(input: ProviderConnectInput): APIProviderRequest {
     provider_id: input.providerId,
     name: input.name,
     upstream_url: input.upstreamUrl,
-    api_key: input.apiKey,
+    // A user_oauth entry has no operator key and the server refuses one, so
+    // an empty key is left out rather than sent.
+    api_key: input.apiKey.trim() ? input.apiKey : undefined,
     extra_values: input.extraValues,
     identity_header_user_id: input.identityHeaderUserId,
     identity_header_groups: input.identityHeaderGroups,

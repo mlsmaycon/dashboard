@@ -1,15 +1,27 @@
 import useFetchApi from "@utils/api";
+import { useCallback } from "react";
+import { useSWRConfig } from "swr";
+import type {
+  CredentialKind,
+  SubscriptionLink,
+} from "@/modules/agent-network/subscriptionLink";
 
 // Wire types for the caller-scoped self-service endpoints. Both answers are
 // computed server-side from the caller's own group memberships with the same
 // rules the proxy enforces, so no agent_network permission is required to
 // read them.
 export type APIMeProvider = {
+  // Record id, which the subscription link endpoints take. id and
+  // credential_kind are missing on servers that predate subscription links.
+  id?: string;
   name: string;
   catalog_id: string;
   api_flavor: string;
   all_models_allowed: boolean;
   models: string[];
+  credential_kind?: CredentialKind;
+  // The caller's own login, present only for user_oauth providers.
+  subscription_link?: SubscriptionLink;
 };
 
 export type APIMeSetup = {
@@ -58,4 +70,21 @@ export const useMyAgentNetworkSetup = () => {
     // route on this don't read a miss as a final "not configured".
     isLoading: isLoading || (!!error && legacy.isLoading),
   } as const;
+};
+
+/**
+ * Returns a function that refetches the caller's agent config, for when
+ * something the answer reports (a subscription link) changed. Both paths are
+ * revalidated; the one this server doesn't serve is a no-op.
+ */
+export const useRefreshAgentConfig = () => {
+  const { mutate } = useSWRConfig();
+  return useCallback(
+    () =>
+      Promise.all([
+        mutate(AGENT_CONFIG_PATH),
+        mutate(LEGACY_AGENT_CONFIG_PATH),
+      ]).then(() => undefined),
+    [mutate],
+  );
 };

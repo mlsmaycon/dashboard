@@ -96,9 +96,18 @@ export const ConnectModalProviderDropdown: Story = {
   },
 };
 
-async function connectLiteLLM() {
+/* Options render once scrolled into view, so the ones below the fold are searched for first. */
+async function pickProvider(search: string, id: string) {
   await ConnectModalProviderDropdown.play!({} as never);
-  await clickTestId("agent-network-provider-option-litellm_proxy");
+  await type(
+    await waitForSelector("input[placeholder='Search providers...']"),
+    search,
+  );
+  await clickTestId(`agent-network-provider-option-${id}`);
+}
+
+async function connectLiteLLM() {
+  await pickProvider("LiteLLM", "litellm_proxy");
   await settle();
   const modal = await dialog();
   await type(
@@ -148,3 +157,20 @@ export const EditBifrostMappings = editStory("Bifrost", "Mappings");
 export const EditVLLM = editStory(
   "Self-hosted vLLM cluster in the Frankfurt datacenter (GPU rack 4)",
 );
+
+/* ChatGPT takes each user's own subscription: no key field, the upstream locked to chatgpt.com. */
+async function connectChatGPT() {
+  await pickProvider("ChatGPT", "chatgpt_codex");
+  await findText(/No API key needed/);
+  await settle();
+}
+
+export const ConnectModalChatGPT: Story = { play: connectChatGPT };
+
+export const ConnectModalChatGPTModels: Story = {
+  play: async () => {
+    await connectChatGPT();
+    await clickTestId("agent-network-provider-models-tab");
+    await settle();
+  },
+};

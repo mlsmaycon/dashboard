@@ -2,6 +2,7 @@
 
 import useFetchApi from "@utils/api";
 import { useMemo } from "react";
+import type { CredentialKind } from "@/modules/agent-network/subscriptionLink";
 
 export type CatalogModel = {
   id: string;
@@ -55,7 +56,20 @@ export type CatalogProvider = {
   // + cache write (additive buckets). Absent for gateway/custom entries
   // — show every cache field for those.
   pricing_surfaces?: string[];
+  // Where the upstream credential comes from. "user_oauth" entries take no
+  // operator key: each user links their own subscription login, as
+  // subscription_login describes. Absent on servers that predate it, which
+  // means an operator key.
+  credential_kind?: CredentialKind;
+  subscription_login?: CatalogSubscriptionLogin;
   models: CatalogModel[];
+};
+
+export type CatalogSubscriptionLogin = {
+  // "device": the user enters a short code on verification_uri while the
+  // dashboard polls for the result.
+  flow: "device";
+  verification_uri: string;
 };
 
 export type CatalogIdentityInjection = {
