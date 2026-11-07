@@ -1,0 +1,113 @@
+name: Fork image
+
+# Builds the dashboard and pushes it to this fork's GitHub packages
+# (ghcr.io/<owner>/dashboard), tagged with the branch name and commit.
+# build_and_push.yml publishes to netbirdio's registries with secrets a fork
+# does not have; this one only needs the workflow's own GITHUB_TOKEN.
+
+on:
+  push:
+    branches:
+      - main
+      - "claude/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: fork-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dashboard:
+    # Never runs upstream: the image belongs to the fork's own packages.
+    if: github.repository_owner == 'mlsmaycon'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: setup-node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - run: echo '{}' > .local-config.json
+
+      - name: Download IronRDP release TS files
+        uses: robinraju/release-downloader@v1.13
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: netbirdio/IronRDP
+          tag: v0.0.2
+          fileName: "*.ts"
+          out-file-path: 'public/ironrdp-pkg'
+
+      - name: Download IronRDP release JS files
+        uses: robinraju/release-downloader@v1.13
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: netbirdio/IronRDP
+          tag: v0.0.2
+          fileName: "*.js"
+          out-file-path: 'public/ironrdp-pkg'
+
+      - name: Download IronRDP release WASM file
+        uses: robinraju/release-downloader@v1.13
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: netbirdio/IronRDP
+          tag: v0.0.2
+          fileName: "ironrdp_web_bg.wasm"
+          out-file-path: 'public/ironrdp-pkg'
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_DASHBOARD_VERSION: ${{ github.ref_name }}-${{ github.sha }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/dashboard
+          flavor: |
+            latest=false
+          tags: |
+            type=ref,event=branch
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Log in to the GitHub Container registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - run: |
+          echo '### Pushed tags' >> $GITHUB_STEP_SUMMARY
+          echo '${{ steps.meta.outputs.tags }}' >> $GITHUB_STEP_SUMMARY
