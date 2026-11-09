@@ -173,6 +173,7 @@ const DEFAULT_EXAMPLE: ConnectExample = {
 // owns (an AWS inference profile, a GCP project), so no fixed request routes
 // to them.
 const PATH_ROUTED: AIProviderId[] = ["bedrock_api", "vertex_ai_api"];
+const CLAUDE_LOGIN_ID = "anthropic_claude_login";
 
 // ConnectProvider is a provider the caller can reach, as the picker offers
 // it: its API shape and the models it serves (empty when any model goes).
@@ -182,7 +183,7 @@ export type ConnectProvider = {
   api: ConnectExample["api"];
   models: string[];
   // The provider's linked login, for one that signs in with a subscription
-  // (ChatGPT) instead of an API key.
+  // instead of an API key.
   linkStatus?: SubscriptionLinkStatus;
 };
 
@@ -198,7 +199,10 @@ export const fromAccountProviders = (
   providers.map((p) => ({
     name: p.name,
     catalogId: p.providerId,
-    api: p.providerId === "anthropic_api" ? "anthropic" : "openai",
+    api:
+      p.providerId === "anthropic_api" || p.providerId === CLAUDE_LOGIN_ID
+        ? "anthropic"
+        : "openai",
     models: p.models.map((m) => m.id),
     ...(p.subscriptionLink ? { linkStatus: p.subscriptionLink.status } : {}),
   }));
@@ -378,6 +382,7 @@ export function AgentConnectTabs({
     providers[0];
   const pathRouted = !!provider && routedByPath(provider);
   const codexOnly = isCodexOnly(provider?.catalogId);
+  const claudeLogin = provider?.catalogId === CLAUDE_LOGIN_ID;
   // With a Codex-only provider picked, the Codex tab is the one that works.
   const openTab = codexOnly ? "codex" : defaultTab;
   const api = provider?.api ?? DEFAULT_EXAMPLE.api;
@@ -387,6 +392,7 @@ export function AgentConnectTabs({
   const model = chosenModel || DEFAULT_MODEL[api];
   const picked: ConnectExample = { api, model };
   const baseUrl = `https://${endpoint}`;
+  const requestBase = claudeLogin ? `${baseUrl}/claude-login` : baseUrl;
   const openaiBase = `${baseUrl}/v1`;
   const [claudeMode, setClaudeMode] = React.useState<ClaudeMode>("config");
   // Which backend the Claude Code config targets follows the picked
@@ -457,6 +463,27 @@ export function AgentConnectTabs({
           )}
         </div>
       )}
+
+      {provider &&
+        (codexOnly || claudeLogin) &&
+        provider.linkStatus !== "linked" && (
+          <div className={contentClassName}>
+            <Callout
+              variant={"warning"}
+              data-testid={"connect-provider-login-missing"}
+            >
+              {provider.linkStatus === "needs_relink"
+                ? `The ${subscriptionName(provider.catalogId)} login for ${
+                    provider.name
+                  } stopped working. Requests are refused until an administrator links it again.`
+                : `No ${subscriptionName(
+                    provider.catalogId,
+                  )} login is linked to ${
+                    provider.name
+                  } yet. Requests are refused until an administrator links one.`}
+            </Callout>
+          </div>
+        )}
 
       <Tabs key={openTab} defaultValue={openTab}>
         <TabsList justify={"start"} className={listClassName}>
@@ -537,12 +564,12 @@ export function AgentConnectTabs({
                             ? [`  "model": "${chosenModel}",`]
                             : []),
                           `  "env": {`,
-                          `    "ANTHROPIC_BASE_URL": "${baseUrl}"`,
+                          `    "ANTHROPIC_BASE_URL": "${requestBase}"`,
                           `  }`,
                           `}`,
                         ]
                       : [
-                          `export ANTHROPIC_BASE_URL=${baseUrl}`,
+                          `export ANTHROPIC_BASE_URL=${requestBase}`,
                           `export ANTHROPIC_API_KEY=none`,
                           ...(chosenModel
                             ? [`export ANTHROPIC_MODEL=${chosenModel}`]
@@ -551,6 +578,13 @@ export function AgentConnectTabs({
                         ]
                   }
                 />
+                {claudeLogin && (
+                  <SmallParagraph className={"mt-3"}>
+                    NetBird supplies the linked Claude login. No Claude login or
+                    provider API key is required on this device. Requests share
+                    the plan&apos;s limits with everyone this provider covers.
+                  </SmallParagraph>
+                )}
               </>
             )}
 
@@ -670,6 +704,12 @@ export function AgentConnectTabs({
           <div className={contentClassName}>
             {pathRouted ? (
               pathNote
+            ) : claudeLogin ? (
+              <SmallParagraph>
+                {provider?.name} serves the Anthropic Messages API. Use Claude
+                Code, OpenCode, Pi, the Anthropic SDK or cURL to connect, or
+                pick an OpenAI provider above for Codex.
+              </SmallParagraph>
             ) : codexOnly && provider ? (
               <>
                 <Snippet
@@ -689,25 +729,6 @@ export function AgentConnectTabs({
                   project&apos;s <code className={"font-mono"}>.codex</code>{" "}
                   folder.
                 </SmallParagraph>
-                {provider.linkStatus && provider.linkStatus !== "linked" && (
-                  <Callout
-                    variant={"warning"}
-                    className={"mt-3"}
-                    data-testid={"connect-provider-login-missing"}
-                  >
-                    {provider.linkStatus === "needs_relink"
-                      ? `The ${subscriptionName(
-                          provider.catalogId,
-                        )} login for ${
-                          provider.name
-                        } stopped working. Requests are refused until an administrator links it again.`
-                      : `No ${subscriptionName(
-                          provider.catalogId,
-                        )} login is linked to ${
-                          provider.name
-                        } yet. Requests are refused until an administrator links one.`}
-                  </Callout>
-                )}
               </>
             ) : (
               <>
@@ -747,7 +768,7 @@ export function AgentConnectTabs({
                       <ConfigPath path={"~/.config/opencode/opencode.json"} />
                     </>
                   }
-                  lines={openCodeLines(picked, baseUrl)}
+                  lines={openCodeLines(picked, requestBase)}
                 />
               </>
             )}
@@ -768,7 +789,7 @@ export function AgentConnectTabs({
                       Add to <ConfigPath path={"~/.pi/agent/models.json"} />
                     </>
                   }
-                  lines={piModelsLines(picked, baseUrl)}
+                  lines={piModelsLines(picked, requestBase)}
                 />
                 <Snippet
                   title={
@@ -836,7 +857,7 @@ export function AgentConnectTabs({
               codexOnlyNote
             ) : (
               <>
-                <Snippet lines={sdkLines(picked, baseUrl)} />
+                <Snippet lines={sdkLines(picked, requestBase)} />
               </>
             )}
           </div>
@@ -850,7 +871,7 @@ export function AgentConnectTabs({
               codexOnlyNote
             ) : (
               <>
-                <Snippet {...curlSnippet(picked, baseUrl)} />
+                <Snippet {...curlSnippet(picked, requestBase)} />
               </>
             )}
           </div>

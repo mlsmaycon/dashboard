@@ -1,7 +1,10 @@
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import ConnectPage from "@/app/(dashboard)/agent-network/connect/page";
 import DashboardLayout from "@/layouts/DashboardLayout";
-import { agentConfigWithChatGPT } from "@/storybook/fixtures";
+import {
+  agentConfigWithChatGPT,
+  agentConfigWithClaude,
+} from "@/storybook/fixtures";
 import { clickRole, findText, popover, settle } from "@/storybook/platform";
 
 const meta: Meta = {
@@ -86,3 +89,23 @@ const chatgptStory = (
 export const ChatGPTLinked = chatgptStory("linked");
 export const ChatGPTNotLinked = chatgptStory("not_linked");
 export const ChatGPTNeedsRelink = chatgptStory("needs_relink");
+
+const claudeStory = (
+  status: "linked" | "not_linked" | "needs_relink",
+  tab?: RegExp,
+): Story => ({
+  parameters: {
+    api: { "GET /agent-network/agent-config": agentConfigWithClaude(status) },
+  },
+  play: async () => {
+    await loaded();
+    if (tab) await clickRole("tab", tab);
+    await findText(/claude-login/);
+    await settle();
+  },
+});
+export const ClaudeLinked = claudeStory("linked");
+export const ClaudeNotLinked = claudeStory("not_linked");
+export const ClaudeNeedsRelink = claudeStory("needs_relink");
+export const ClaudeSubscriptionSDK = claudeStory("linked", /SDK/);
+export const ClaudeSubscriptionCurl = claudeStory("linked", /curl/i);

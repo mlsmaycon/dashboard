@@ -40,7 +40,7 @@ const catalog = [
       model("o3", "o3", 0.002, 0.008),
     ],
   },
-  /* The one user_oauth entry: no operator key, an administrator links one ChatGPT login to the
+  /* A user_oauth entry: no operator key, an administrator links one ChatGPT login to the
      provider. The modal reaches it through OpenAI's sign-in method rather than listing it. */
   {
     id: "chatgpt_codex",
@@ -78,6 +78,19 @@ const catalog = [
         cache_creation_per_1k: 0.00125,
       }),
     ],
+  },
+  {
+    id: "anthropic_claude_login",
+    name: "Anthropic (Claude login)",
+    description: "Claude models on a shared Claude plan",
+    default_host: "api.anthropic.com",
+    auth_header_template: "Authorization: Bearer {key}",
+    default_content_type: "application/json",
+    brand_color: "#d97757",
+    kind: "provider",
+    credential_kind: "user_oauth",
+    subscription_login: { flow: "authorization_code" },
+    models: [],
   },
   {
     id: "azure_openai_api",
@@ -577,6 +590,19 @@ export const agentConfigWithChatGPT = (status: SubscriptionLinkStatus) => ({
   providers: [chatgptConfigProvider(status)],
 });
 
+export const claudeConfigProvider = (status: SubscriptionLinkStatus) => ({
+  ...chatgptConfigProvider(status),
+  id: "anp-claude",
+  name: "Claude team plan",
+  catalog_id: "anthropic_claude_login",
+  api_flavor: "anthropic",
+});
+
+export const agentConfigWithClaude = (status: SubscriptionLinkStatus) => ({
+  ...agentConfig,
+  providers: [claudeConfigProvider(status)],
+});
+
 /* One ChatGPT-login provider per login state, for the providers table. */
 export const chatgptProvidersByLoginState = (
   ["linked", "not_linked", "needs_relink"] as const
@@ -605,6 +631,26 @@ export const linkFlow =
     verification_uri: "https://auth.openai.com/codex/device",
     expires_at: new Date(Date.now() + 15 * 60_000).toISOString(),
     interval_seconds: 5,
+  });
+
+export const claudeProvidersByLoginState = chatgptProvidersByLoginState.map(
+  (provider, i) => ({
+    ...provider,
+    id: provider.id.replace("chatgpt", "claude"),
+    provider_id: "anthropic_claude_login",
+    name: ["Claude team plan", "Claude research", "Claude support"][i],
+    upstream_url: "https://api.anthropic.com",
+  }),
+);
+
+export const claudeLinkFlow =
+  (status: "pending" | "linked" | "expired" | "failed") => () => ({
+    ...linkFlow(status)(),
+    flow: "authorization_code",
+    authorization_uri:
+      "https://claude.ai/oauth/authorize?state=storybook-state",
+    user_code: "",
+    verification_uri: "",
   });
 
 export const agentConfigUnconfigured = {
@@ -822,7 +868,9 @@ export const agentNetworkFixtures: Record<string, Handler> = {
       enabled: true,
       created_at: created,
       updated_at: created,
-      ...(req.provider_id === "chatgpt_codex"
+      ...(["chatgpt_codex", "anthropic_claude_login"].includes(
+        req.provider_id ?? "",
+      )
         ? { subscription_link: { status: "not_linked" } }
         : {}),
     };
@@ -830,5 +878,6 @@ export const agentNetworkFixtures: Record<string, Handler> = {
   // Linking a provider's login: it stays pending until a story says otherwise.
   "POST /agent-network/providers/:id/link": linkFlow("pending"),
   "GET /agent-network/providers/:id/link/:flowId": linkFlow("pending"),
+  "POST /agent-network/providers/:id/link/:flowId": claudeLinkFlow("linked"),
   "DELETE /agent-network/providers/:id/link": {},
 };

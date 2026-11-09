@@ -64,6 +64,27 @@ const copied = async () => {
 const model = (id: string) => ({ id, inputPer1k: 0, outputPer1k: 0 });
 
 describe("fromAccountProviders", () => {
+  it("keeps a Claude subscription on the Anthropic API and preserves its login status", () => {
+    expect(
+      fromAccountProviders([
+        {
+          name: "Claude team plan",
+          providerId: "anthropic_claude_login",
+          models: [model("claude-sonnet-5")],
+          subscriptionLink: { status: "needs_relink" },
+        },
+      ]),
+    ).toEqual([
+      {
+        name: "Claude team plan",
+        catalogId: "anthropic_claude_login",
+        api: "anthropic",
+        models: ["claude-sonnet-5"],
+        linkStatus: "needs_relink",
+      },
+    ]);
+  });
+
   it("asks Anthropic through its Messages API, everything else through Chat Completions", () => {
     expect(
       fromAccountProviders([
@@ -283,6 +304,117 @@ describe("AgentConnectTabs", () => {
     expect(shownLines()).toEqual([]);
     expect(screen.getByText(/speaks the Anthropic Messages API/)).toBeTruthy();
   });
+
+  describe("with a Claude subscription provider", () => {
+    const claude: ConnectProvider = {
+      name: "Claude team plan",
+      catalogId: "anthropic_claude_login",
+      api: "anthropic",
+      models: ["claude-sonnet-5"],
+      linkStatus: "linked",
+    };
+
+    it("isolates Claude Code JSON and shell requests under /claude-login", () => {
+      render(<AgentConnectTabs endpoint={ENDPOINT} providers={[claude]} />);
+
+      expect(shownLines()).toContain(
+        `    "ANTHROPIC_BASE_URL": "https://${ENDPOINT}/claude-login"`,
+      );
+      expect(
+        screen.getByText(/NetBird supplies the linked Claude login/),
+      ).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Shell" }));
+      expect(shownLines()).toContain(
+        `export ANTHROPIC_BASE_URL=https://${ENDPOINT}/claude-login`,
+      );
+      expect(shownLines().join("\n")).not.toContain("CLAUDE_CODE_OAUTH_TOKEN");
+    });
+
+    it.each([
+      ["sdk", `    base_url="https://${ENDPOINT}/claude-login",`],
+      ["opencode", `        "baseURL": "https://${ENDPOINT}/claude-login/v1",`],
+      ["pi", `      "baseUrl": "https://${ENDPOINT}/claude-login",`],
+    ])("uses the login route in %s config", (defaultTab, expectedLine) => {
+      render(
+        <AgentConnectTabs
+          endpoint={ENDPOINT}
+          providers={[claude]}
+          defaultTab={defaultTab}
+        />,
+      );
+      expect(shownLines()).toContain(expectedLine);
+    });
+
+    it("copies a prefixed Messages request without a credential", async () => {
+      render(
+        <AgentConnectTabs
+          endpoint={ENDPOINT}
+          providers={[claude]}
+          defaultTab={"curl"}
+        />,
+      );
+      const request = await copied();
+      expect(request).toContain(`https://${ENDPOINT}/claude-login/v1/messages`);
+      expect(request).not.toMatch(/Authorization|x-api-key/);
+    });
+
+    it("keeps API-key Anthropic requests outside the login namespace after changing provider", () => {
+      const view = render(
+        <AgentConnectTabs
+          endpoint={ENDPOINT}
+          providers={[claude]}
+          defaultTab={"sdk"}
+        />,
+      );
+      expect(shownLines()).toContain(
+        `    base_url="https://${ENDPOINT}/claude-login",`,
+      );
+      view.rerender(
+        <AgentConnectTabs
+          endpoint={ENDPOINT}
+          providers={anthropic}
+          defaultTab={"sdk"}
+        />,
+      );
+      expect(shownLines()).toContain(`    base_url="https://${ENDPOINT}",`);
+      expect(shownLines().join("\n")).not.toContain("/claude-login");
+    });
+
+    it("does not generate a Codex config for an Anthropic-only login", () => {
+      render(
+        <AgentConnectTabs
+          endpoint={ENDPOINT}
+          providers={[claude]}
+          defaultTab={"codex"}
+        />,
+      );
+      expect(shownLines()).toEqual([]);
+      expect(
+        screen.getByText(/serves the Anthropic Messages API/),
+      ).toBeTruthy();
+    });
+
+    it.each(["not_linked", "needs_relink", undefined] as const)(
+      "shows %s login state outside the Claude tab",
+      (linkStatus) => {
+        render(
+          <AgentConnectTabs
+            endpoint={ENDPOINT}
+            providers={[{ ...claude, linkStatus }]}
+            defaultTab={"curl"}
+          />,
+        );
+        const warning = screen.getByTestId(
+          "connect-provider-login-missing",
+        ).textContent;
+        expect(warning).toContain("Claude login");
+        expect(warning).toContain(
+          linkStatus === "needs_relink" ? "links it again" : "links one",
+        );
+      },
+    );
+  });
+
   describe("with a ChatGPT subscription provider", () => {
     const chatgpt: ConnectProvider = {
       name: "ChatGPT",

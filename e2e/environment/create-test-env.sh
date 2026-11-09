@@ -538,6 +538,9 @@ initEnvironment() {
   TURN_USER="self"
   TURN_PASSWORD=$(openssl rand -base64 32 | sed 's/=//g')
   RELAY_SECRET=$(openssl rand -hex 32)
+  # A fresh key for this disposable environment lets subscription login tests
+  # persist credentials without depending on the image's key-generation path.
+  NETBIRD_TEST_DATASTORE_ENCRYPTION_KEY=$(openssl rand -base64 32)
   TURN_MIN_PORT=49152
   TURN_MAX_PORT=65535
 
@@ -723,6 +726,7 @@ EOF
 renderManagementJson() {
   cat <<EOF
 {
+    "DataStoreEncryptionKey": "$NETBIRD_TEST_DATASTORE_ENCRYPTION_KEY",
     "StoreConfig": {
         "Engine": "postgres"
     },

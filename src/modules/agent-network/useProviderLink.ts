@@ -21,8 +21,8 @@ const PROVIDERS_PATH = "/agent-network/providers";
 const linkSuffix = (providerId: string) => `/${providerId}/link`;
 
 /**
- * Runs the device-code login that links a subscription to a user_oauth
- * provider: start(providerId) asks the server for a code, then the flow is
+ * Runs the login that links a subscription to a user_oauth
+ * provider: start(providerId) asks the server for a sign-in flow, then it is
  * polled every interval_seconds until it is linked, expired or failed. The
  * provider id is passed to start rather than to the hook, so a modal can link
  * the provider it has only just created. Polling stops on a terminal state,
@@ -40,6 +40,10 @@ export function useProviderLink({ onLinked }: { onLinked?: () => void } = {}) {
   const requestFlow = useEventCallback((providerId: string, flowId: string) =>
     api.get(`${linkSuffix(providerId)}/${flowId}`),
   );
+  const requestComplete = useEventCallback(
+    (providerId: string, flowId: string, code: string) =>
+      api.post({ code }, `${linkSuffix(providerId)}/${flowId}`),
+  );
   const notifyLinked = useEventCallback(() => onLinked?.());
 
   // Each start() owns one attempt. An answer for an older attempt, or one
@@ -47,6 +51,7 @@ export function useProviderLink({ onLinked }: { onLinked?: () => void } = {}) {
   const attempt = useRef(0);
   const target = useRef("");
   const mounted = useRef(true);
+  const submitting = useRef(false);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -57,6 +62,7 @@ export function useProviderLink({ onLinked }: { onLinked?: () => void } = {}) {
   const start = useCallback(
     (providerId: string) => {
       const current = ++attempt.current;
+      submitting.current = false;
       target.current = providerId;
       const live = () => mounted.current && attempt.current === current;
       dispatch({ type: "start" });
@@ -70,6 +76,34 @@ export function useProviderLink({ onLinked }: { onLinked?: () => void } = {}) {
     },
     [requestStart],
   );
+
+  // Authorization codes are single-use. Never retry this POST automatically,
+  // and invalidate any already-running poll before submitting it.
+  const complete = useEventCallback((code: string) => {
+    if (
+      state.phase !== "pending" ||
+      state.flow.flow !== "authorization_code" ||
+      submitting.current ||
+      !code.trim()
+    )
+      return;
+    submitting.current = true;
+    const current = ++attempt.current;
+    const live = () => mounted.current && attempt.current === current;
+    dispatch({ type: "complete" });
+    requestComplete(target.current, state.flow.id, code.trim())
+      .then(
+        (flow) => live() && dispatch({ type: "flow", flow, at: Date.now() }),
+      )
+      .catch(
+        (err) =>
+          live() &&
+          dispatch({ type: "complete-error", code: errorOf(err).code }),
+      )
+      .finally(() => {
+        if (live()) submitting.current = false;
+      });
+  });
 
   // The effect is the polling loop: every answer, "pending" again or a poll
   // that failed and is to be retried, is a new state object and schedules the
@@ -104,10 +138,11 @@ export function useProviderLink({ onLinked }: { onLinked?: () => void } = {}) {
   // to expire on the server; nothing there needs undoing.
   const cancel = useCallback(() => {
     attempt.current++;
+    submitting.current = false;
     dispatch({ type: "cancel" });
   }, []);
 
-  return { state, start, cancel } as const;
+  return { state, start, complete, cancel } as const;
 }
 
 /**

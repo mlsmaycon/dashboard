@@ -4,6 +4,8 @@ import DashboardLayout from "@/layouts/DashboardLayout";
 import {
   agentProviders,
   chatgptProvidersByLoginState,
+  claudeLinkFlow,
+  claudeProvidersByLoginState,
 } from "@/storybook/fixtures";
 import {
   click,
@@ -219,6 +221,115 @@ export const LoginLinkDialog: Story = {
     await clickRole("button", /^Link$/);
     await dialog();
     await findText("WDJB-MJHT");
+    await settle();
+  },
+};
+
+async function chooseClaudeLogin() {
+  await pickProvider("Anthropic", "anthropic_api");
+  await clickTestId("agent-network-provider-auth-login");
+  await findText(/shares one Claude plan/);
+  await settle();
+}
+
+export const ConnectModalClaudeLogin: Story = { play: chooseClaudeLogin };
+
+export const ConnectModalClaudeModels: Story = {
+  play: async () => {
+    await chooseClaudeLogin();
+    await clickTestId("agent-network-provider-models-tab");
+    await settle();
+  },
+};
+
+const claudeLoginAPI = {
+  "GET /agent-network/providers": [
+    ...agentProviders,
+    ...claudeProvidersByLoginState,
+  ],
+  "POST /agent-network/providers/:id/link": claudeLinkFlow("pending"),
+  "GET /agent-network/providers/:id/link/:flowId": claudeLinkFlow("pending"),
+};
+
+export const ConnectModalClaudeLinkPending: Story = {
+  parameters: { api: claudeLoginAPI },
+  play: async () => {
+    await chooseClaudeLogin();
+    await clickTestId("agent-network-provider-continue");
+    await clickTestId("agent-network-provider-submit");
+    await findText("Paste the code from the sign-in page");
+    await settle();
+  },
+};
+
+export const ClaudeLoginStates: Story = {
+  parameters: { api: claudeLoginAPI },
+  play: async () => {
+    await findText("Claude support");
+    await settle();
+  },
+};
+
+export const EditClaude: Story = {
+  ...editStory("Claude team plan"),
+  parameters: { api: claudeLoginAPI },
+};
+
+async function openClaudeLink() {
+  await findText("Claude research");
+  await clickRole("button", /^Link$/);
+  await dialog();
+}
+
+export const ClaudeLinkDialog: Story = {
+  parameters: { api: claudeLoginAPI },
+  play: async () => {
+    await openClaudeLink();
+    await findText("Paste the code from the sign-in page");
+    await settle();
+  },
+};
+
+export const ClaudeLinkComplete: Story = {
+  parameters: { api: claudeLoginAPI },
+  play: async () => {
+    await openClaudeLink();
+    await type(
+      await waitForSelector(
+        "[data-testid=agent-network-provider-authorization-code]",
+      ),
+      "storybook-code#storybook-state",
+    );
+    await clickRole("button", "Link login");
+    await findText(/plan is linked/);
+    await settle();
+  },
+};
+
+export const ClaudeLinkExpired: Story = {
+  parameters: {
+    api: {
+      ...claudeLoginAPI,
+      "POST /agent-network/providers/:id/link": claudeLinkFlow("expired"),
+    },
+  },
+  play: async () => {
+    await openClaudeLink();
+    await findText("The code expired before the login was approved.");
+    await settle();
+  },
+};
+
+export const ClaudeLinkFailed: Story = {
+  parameters: {
+    api: {
+      ...claudeLoginAPI,
+      "POST /agent-network/providers/:id/link": claudeLinkFlow("failed"),
+    },
+  },
+  play: async () => {
+    await openClaudeLink();
+    await findText("Claude did not approve the login.");
     await settle();
   },
 };

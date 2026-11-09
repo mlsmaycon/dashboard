@@ -360,7 +360,7 @@ export default function AIProviderModal({
   const userOAuth = usesUserOAuth(catalog);
   const pinnedUpstreamUrl =
     userOAuth && catalog ? userOAuthUpstreamUrl(catalog) : undefined;
-  // A vendor's login entry (OpenAI's ChatGPT login) is not in the picker: the
+  // A vendor's login entry is not in the picker: the
   // operator picks the vendor, then how it signs in. The choice is offered only
   // when the server's catalog carries the login entry.
   const pickerId = pickerIdOf(providerId) as AIProviderId;
@@ -961,6 +961,7 @@ export default function AIProviderModal({
               state={link.state}
               catalogId={providerId}
               onRetry={() => link.start(linkTarget)}
+              onComplete={link.complete}
             />
           </div>
           <ModalFooter className={"items-center"}>

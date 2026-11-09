@@ -122,6 +122,7 @@ function ProviderLoginActions({ provider }: { provider: AIProvider }) {
         open={open}
         onClose={closeLink}
         onRetry={() => link.start(provider.id)}
+        onComplete={link.complete}
         state={link.state}
         catalogId={provider.providerId}
         planType={provider.subscriptionLink?.plan_type}

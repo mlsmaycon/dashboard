@@ -206,3 +206,106 @@ describe("useProviderUnlink", () => {
     await expect(result.current("anp-chatgpt")).resolves.toBe(false);
   });
 });
+
+describe("authorization-code linking", () => {
+  const claudeFlow = (status: LinkFlow["status"]): LinkFlow => ({
+    ...flow(status),
+    flow: "authorization_code",
+    authorization_uri: "https://claude.ai/oauth/authorize?state=test-state",
+    user_code: "",
+  });
+
+  it("submits a pasted code once, pauses polling, and refreshes on success", async () => {
+    let complete: (value: LinkFlow) => void = () => {};
+    post.mockResolvedValueOnce(claudeFlow("pending")).mockImplementationOnce(
+      () =>
+        new Promise<LinkFlow>((resolve) => {
+          complete = resolve;
+        }),
+    );
+    const { result, onLinked } = await startLink();
+    act(() => {
+      result.current.complete("  code#test-state  ");
+      result.current.complete("code#test-state");
+    });
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(post).toHaveBeenLastCalledWith(
+      { code: "code#test-state" },
+      "/anp-chatgpt/link/flow-1",
+    );
+    expect(result.current.state.phase).toBe("completing");
+    await tick(30_000);
+    expect(get).not.toHaveBeenCalled();
+    complete(claudeFlow("linked"));
+    await flush();
+    expect(result.current.state.phase).toBe("linked");
+    expect(onLinked).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a late pending poll while a code is being completed", async () => {
+    let poll: (value: LinkFlow) => void = () => {};
+    post
+      .mockResolvedValueOnce(claudeFlow("pending"))
+      .mockImplementationOnce(() => new Promise(() => {}));
+    get.mockImplementationOnce(
+      () =>
+        new Promise<LinkFlow>((resolve) => {
+          poll = resolve;
+        }),
+    );
+    const { result } = await startLink();
+    await tick(5000);
+    act(() => result.current.complete("code#test-state"));
+    poll(claudeFlow("pending"));
+    await flush();
+    expect(result.current.state.phase).toBe("completing");
+  });
+
+  it("allows a new pasted code after validation fails without exposing server error text", async () => {
+    post
+      .mockResolvedValueOnce(claudeFlow("pending"))
+      .mockRejectedValueOnce({ code: 400, message: "secret-code" })
+      .mockResolvedValueOnce(claudeFlow("linked"));
+    const { result } = await startLink();
+    act(() => result.current.complete("bad-code"));
+    await flush();
+    expect(result.current.state).toMatchObject({
+      phase: "pending",
+      completionError: expect.any(String),
+    });
+    expect(JSON.stringify(result.current.state)).not.toContain("secret-code");
+    get.mockResolvedValue(claudeFlow("pending"));
+    await tick(5000);
+    expect(result.current.state).toMatchObject({
+      completionError: expect.any(String),
+    });
+    act(() =>
+      result.current.complete(
+        "https://console.anthropic.com/oauth/code/callback?code=valid&state=test-state",
+      ),
+    );
+    await flush();
+    expect(result.current.state.phase).toBe("linked");
+  });
+
+  it.each(["cancel", "unmount"])(
+    "ignores a late completion after %s",
+    async (action) => {
+      let complete: (value: LinkFlow) => void = () => {};
+      post.mockResolvedValueOnce(claudeFlow("pending")).mockImplementationOnce(
+        () =>
+          new Promise<LinkFlow>((resolve) => {
+            complete = resolve;
+          }),
+      );
+      const { result, unmount, onLinked } = await startLink();
+      act(() => result.current.complete("code#test-state"));
+      if (action === "cancel") act(() => result.current.cancel());
+      else unmount();
+      complete(claudeFlow("linked"));
+      await flush();
+      expect(onLinked).not.toHaveBeenCalled();
+      if (action === "cancel") expect(result.current.state.phase).toBe("idle");
+    },
+  );
+});

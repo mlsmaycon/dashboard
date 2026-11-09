@@ -18,8 +18,11 @@ export {
 export {
   agentConfig,
   agentConfigWithChatGPT,
+  agentConfigWithClaude,
   agentProviders,
   chatgptProvidersByLoginState,
+  claudeLinkFlow,
+  claudeProvidersByLoginState,
   linkFlow,
 } from "../../.storybook/mocks/fixtures/platform-agent-network";
 export {

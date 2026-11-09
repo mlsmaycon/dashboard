@@ -3,6 +3,7 @@
 import Button from "@components/Button";
 import { Callout } from "@components/Callout";
 import Code from "@components/Code";
+import { Input } from "@components/Input";
 import {
   Modal,
   ModalClose,
@@ -20,7 +21,7 @@ import {
   RefreshCwIcon,
 } from "lucide-react";
 import Link from "next/link";
-import React from "react";
+import React, { useState } from "react";
 import AIProviderLogo from "@/modules/agent-network/AIProviderLogo";
 import { AIProviderId } from "@/modules/agent-network/data/mockData";
 import {
@@ -35,6 +36,7 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onRetry: () => void;
+  onComplete: (code: string) => void;
   state: LinkState;
   catalogId: string;
   // Plan the server reported once the link landed, read from the provider.
@@ -48,6 +50,7 @@ export default function ProviderLinkModal({
   open,
   onClose,
   onRetry,
+  onComplete,
   state,
   catalogId,
   planType,
@@ -68,6 +71,7 @@ export default function ProviderLinkModal({
             catalogId={catalogId}
             planType={planType}
             onRetry={onRetry}
+            onComplete={onComplete}
           />
         </div>
 
@@ -97,19 +101,20 @@ export function ProviderLinkHeader({ catalogId }: { catalogId: string }) {
   );
 }
 
-// ProviderLinkBody walks the operator through a device-code login: open the
-// vendor page, type the code, approve. The flow itself lives in
+// ProviderLinkBody walks the operator through the vendor's sign-in. The flow lives in
 // useProviderLink; this only renders the phase it is in.
 export function ProviderLinkBody({
   state,
   catalogId,
   planType,
   onRetry,
+  onComplete,
 }: {
   state: LinkState;
   catalogId: string;
   planType?: string;
   onRetry: () => void;
+  onComplete: (code: string) => void;
 }) {
   const name = subscriptionName(catalogId);
   switch (state.phase) {
@@ -118,10 +123,26 @@ export function ProviderLinkBody({
       return (
         <Paragraph className={"text-sm flex items-center gap-2"}>
           <Loader2 size={14} className={"animate-spin"} />
-          Requesting a sign-in code…
+          Starting sign-in…
         </Paragraph>
       );
     case "pending":
+    case "completing":
+      if (state.flow.flow === "authorization_code") {
+        return (
+          <AuthorizationCodeSteps
+            key={state.flow.id}
+            flow={state.flow}
+            checkedAt={state.checkedAt}
+            name={name}
+            completing={state.phase === "completing"}
+            error={
+              state.phase === "pending" ? state.completionError : undefined
+            }
+            onComplete={onComplete}
+          />
+        );
+      }
       return (
         <PendingSteps
           flow={state.flow}
@@ -161,6 +182,103 @@ export function ProviderLinkBody({
     case "unavailable":
       return <Retry onRetry={onRetry}>{state.message}</Retry>;
   }
+}
+
+function AuthorizationCodeSteps({
+  flow,
+  checkedAt,
+  name,
+  completing,
+  error,
+  onComplete,
+}: {
+  flow: LinkFlow;
+  checkedAt: number;
+  name: string;
+  completing: boolean;
+  error?: string;
+  onComplete: (code: string) => void;
+}) {
+  const [code, setCode] = useState("");
+  const uri = flow.authorization_uri;
+  const minutes = minutesLeft(flow.expires_at, checkedAt);
+  if (!uri)
+    return (
+      <Callout variant={"warning"}>
+        The sign-in page is unavailable. Close this dialog and start a new
+        login.
+      </Callout>
+    );
+
+  return (
+    <Steps className={"pt-0"}>
+      <Steps.Step step={1}>
+        <p>Open the {name} sign-in page</p>
+        <div className={"flex"}>
+          <Link
+            href={uri}
+            target={"_blank"}
+            rel={"noopener noreferrer"}
+            data-testid={"agent-network-provider-authorization-link"}
+          >
+            <Button variant={"secondary"} size={"sm"}>
+              <ExternalLinkIcon size={14} />
+              Open {hostOf(uri)}
+            </Button>
+          </Link>
+        </div>
+        <p className={"text-sm text-nb-gray-400 font-normal"}>
+          Sign in and approve access to the plan this provider will share.
+        </p>
+      </Steps.Step>
+      <Steps.Step step={2} line={false}>
+        <label htmlFor={"provider-authorization-code"}>
+          Paste the code from the sign-in page
+        </label>
+        <form
+          className={"flex flex-col gap-3"}
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!code.trim() || completing) return;
+            onComplete(code);
+            setCode("");
+          }}
+        >
+          <Input
+            id={"provider-authorization-code"}
+            data-testid={"agent-network-provider-authorization-code"}
+            type={"password"}
+            autoComplete={"off"}
+            spellCheck={false}
+            value={code}
+            onChange={(event) => setCode(event.target.value)}
+            disabled={completing}
+            placeholder={"Authorization code or callback URL"}
+          />
+          <p className={"text-xs text-nb-gray-400 font-normal"}>
+            {minutes > 0
+              ? `This sign-in expires in ${minutes} ${
+                  minutes === 1 ? "minute" : "minutes"
+                }.`
+              : "This sign-in is about to expire."}
+          </p>
+          {error && <Callout variant={"warning"}>{error}</Callout>}
+          <div className={"flex"}>
+            <Button
+              type={"submit"}
+              data-testid={"agent-network-provider-link-submit"}
+              variant={"primary"}
+              size={"sm"}
+              disabled={completing || !code.trim()}
+            >
+              {completing && <Loader2 size={14} className={"animate-spin"} />}
+              {completing ? "Linking…" : "Link login"}
+            </Button>
+          </div>
+        </form>
+      </Steps.Step>
+    </Steps>
+  );
 }
 
 function PendingSteps({

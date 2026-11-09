@@ -63,7 +63,8 @@ describe("linkStatusOf", () => {
 describe("sign-in method", () => {
   it("reaches the ChatGPT login through the OpenAI entry", () => {
     expect(loginAlternativeOf("openai_api")).toBe("chatgpt_codex");
-    expect(loginAlternativeOf("anthropic_api")).toBeUndefined();
+    expect(loginAlternativeOf("anthropic_api")).toBe("anthropic_claude_login");
+    expect(loginAlternativeOf("mistral_api")).toBeUndefined();
     expect(isLoginAlternative("chatgpt_codex"), "kept out of the picker").toBe(
       true,
     );
@@ -73,6 +74,8 @@ describe("sign-in method", () => {
   it("shows a login record as its vendor with the login method", () => {
     expect(pickerIdOf("chatgpt_codex")).toBe("openai_api");
     expect(authMethodOf("chatgpt_codex")).toBe("login");
+    expect(pickerIdOf("anthropic_claude_login")).toBe("anthropic_api");
+    expect(authMethodOf("anthropic_claude_login")).toBe("login");
     expect(pickerIdOf("anthropic_api")).toBe("anthropic_api");
     expect(authMethodOf("openai_api")).toBe("api_key");
   });
@@ -81,9 +84,13 @@ describe("sign-in method", () => {
     expect(catalogIdFor("openai_api", "login")).toBe("chatgpt_codex");
     expect(catalogIdFor("openai_api", "api_key")).toBe("openai_api");
     expect(
-      catalogIdFor("anthropic_api", "login"),
+      catalogIdFor("mistral_api", "login"),
       "a vendor without a login keeps its own entry",
-    ).toBe("anthropic_api");
+    ).toBe("mistral_api");
+    expect(catalogIdFor("anthropic_api", "login")).toBe(
+      "anthropic_claude_login",
+    );
+    expect(catalogIdFor("anthropic_api", "api_key")).toBe("anthropic_api");
   });
 });
 
@@ -115,6 +122,34 @@ describe("codexSubscriptionLines", () => {
 });
 
 describe("linkReducer", () => {
+  it("allows code completion only for an authorization-code flow", () => {
+    const device = run(
+      IDLE,
+      { type: "start" },
+      { type: "flow", flow: flow("pending"), at: 1 },
+    );
+    expect(run(device, { type: "complete" })).toBe(device);
+    const pending = run(
+      IDLE,
+      { type: "start" },
+      {
+        type: "flow",
+        flow: flow("pending", { flow: "authorization_code" }),
+        at: 1,
+      },
+    );
+    const completing = run(pending, { type: "complete" });
+    expect(completing.phase).toBe("completing");
+    expect(
+      run(completing, { type: "complete-error", code: 400 }),
+    ).toMatchObject({ phase: "pending", completionError: expect.any(String) });
+    expect(run(completing, { type: "complete-error", code: 404 }).phase).toBe(
+      "failed",
+    );
+    expect(
+      run(completing, { type: "flow", flow: flow("linked"), at: 2 }).phase,
+    ).toBe("linked");
+  });
   it("goes from start through pending to linked", () => {
     const started = run(IDLE, { type: "start" });
     expect(started.phase).toBe("starting");

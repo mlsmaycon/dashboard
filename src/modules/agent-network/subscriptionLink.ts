@@ -1,5 +1,5 @@
 // Logic for user_oauth providers: catalog entries with no operator key, where
-// an administrator links one subscription login (ChatGPT for Codex today) to
+// an administrator links one subscription login to
 // the provider, and every request its policies allow goes out under that
 // login. The components only render what these functions decide.
 
@@ -23,7 +23,7 @@ export type SubscriptionLink = {
 
 export type LinkFlowStatus = "pending" | "linked" | "expired" | "failed";
 
-// A device-code login in progress, as POST/GET .../link answer it.
+// A login in progress. Missing flow means device for older management servers.
 export type LinkFlow = {
   id: string;
   status: LinkFlowStatus;
@@ -31,6 +31,8 @@ export type LinkFlow = {
   verification_uri: string;
   expires_at: string;
   interval_seconds: number;
+  flow?: "device" | "authorization_code";
+  authorization_uri?: string;
 };
 
 const USER_OAUTH: CredentialKind = "user_oauth";
@@ -57,6 +59,7 @@ export const linkStatusOf = (
 // What the subscription is called on buttons and in copy, per catalog entry.
 const SUBSCRIPTION_NAME: Record<string, string> = {
   chatgpt_codex: "ChatGPT",
+  anthropic_claude_login: "Claude",
 };
 
 export const subscriptionName = (catalogId: string) =>
@@ -73,6 +76,7 @@ export const planLabel = (plan?: string) =>
 // in. Keyed by the vendor's key-based entry.
 const LOGIN_ALTERNATIVE: Record<string, string> = {
   openai_api: "chatgpt_codex",
+  anthropic_api: "anthropic_claude_login",
 };
 
 export type AuthMethod = "api_key" | "login";
@@ -140,7 +144,13 @@ export type LinkState =
   | { phase: "starting" }
   // checkedAt is when the server last answered, to count the code's
   // remaining lifetime from.
-  | { phase: "pending"; flow: LinkFlow; checkedAt: number }
+  | {
+      phase: "pending";
+      flow: LinkFlow;
+      checkedAt: number;
+      completionError?: string;
+    }
+  | { phase: "completing"; flow: LinkFlow; checkedAt: number }
   | { phase: "linked"; flow: LinkFlow }
   | { phase: "expired"; flow: LinkFlow }
   | { phase: "failed"; flow?: LinkFlow; message?: string }
@@ -154,6 +164,8 @@ export type LinkAction =
   | { type: "flow"; flow: LinkFlow; at: number }
   | { type: "start-error"; code?: number; message?: string }
   | { type: "poll-error"; code?: number; message?: string }
+  | { type: "complete" }
+  | { type: "complete-error"; code?: number }
   // The user closed the dialog: whatever was in flight is abandoned.
   | { type: "cancel" };
 
@@ -188,8 +200,8 @@ export function startErrorMessage(code?: number, message?: string): string {
 }
 
 // linkReducer moves a link attempt through its phases. A flow answer only
-// lands while one is starting or pending, so a late poll can't reopen a
-// finished attempt. A failed poll is retried on the next tick, except when
+// lands while one is starting, pending or completing, so a late answer can't
+// reopen a finished attempt. A failed poll is retried on the next tick, except when
 // the server no longer knows the flow (404) or refuses it (400).
 // "start" is accepted from any phase: it is also how a finished or abandoned
 // attempt is retried.
@@ -200,8 +212,39 @@ export function linkReducer(state: LinkState, action: LinkAction): LinkState {
     case "cancel":
       return IDLE;
     case "flow":
-      if (state.phase !== "starting" && state.phase !== "pending") return state;
+      if (
+        state.phase !== "starting" &&
+        state.phase !== "pending" &&
+        state.phase !== "completing"
+      )
+        return state;
+      if (state.phase === "pending" && action.flow.status === "pending") {
+        return { ...state, flow: action.flow, checkedAt: action.at };
+      }
       return fromFlow(action.flow, action.at);
+    case "complete":
+      if (state.phase !== "pending" || state.flow.flow !== "authorization_code")
+        return state;
+      return {
+        phase: "completing",
+        flow: state.flow,
+        checkedAt: state.checkedAt,
+      };
+    case "complete-error":
+      if (state.phase !== "completing") return state;
+      if (action.code === 404 || action.code === 410)
+        return {
+          phase: "failed",
+          flow: state.flow,
+          message: "The login is no longer available. Start a new one.",
+        };
+      return {
+        phase: "pending",
+        flow: state.flow,
+        checkedAt: state.checkedAt,
+        completionError:
+          "The login could not be completed. Check the code from the sign-in page and try again, or start a new login.",
+      };
     case "start-error":
       if (state.phase !== "starting") return state;
       return {

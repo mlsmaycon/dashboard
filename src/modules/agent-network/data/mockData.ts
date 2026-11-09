@@ -10,6 +10,7 @@ export type AIProviderId =
   | "openai_api"
   | "chatgpt_codex"
   | "anthropic_api"
+  | "anthropic_claude_login"
   | "azure_openai_api"
   | "bedrock_api"
   | "vertex_ai_api"
