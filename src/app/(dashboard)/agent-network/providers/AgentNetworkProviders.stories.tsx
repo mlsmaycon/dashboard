@@ -1,11 +1,15 @@
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
+import { expect } from "storybook/test";
 import ProvidersPage from "@/app/(dashboard)/agent-network/providers/page";
 import DashboardLayout from "@/layouts/DashboardLayout";
 import {
+  agentProviderCatalog,
   agentProviders,
+  chatgptBrowserLinkFlow,
   chatgptProvidersByLoginState,
   claudeLinkFlow,
   claudeProvidersByLoginState,
+  linkFlow,
 } from "@/storybook/fixtures";
 import {
   click,
@@ -221,6 +225,152 @@ export const LoginLinkDialog: Story = {
     await clickRole("button", /^Link$/);
     await dialog();
     await findText("WDJB-MJHT");
+    await settle();
+  },
+};
+
+const browserFlow = (status: "pending" | "linked" | "expired") => ({
+  ...chatgptBrowserLinkFlow(status)(),
+  id: "browser-flow-1",
+});
+const deviceFlow = () => ({ ...linkFlow("pending")(), id: "device-flow-1" });
+const browserLoginAPI = {
+  ...loginStates.api,
+  "POST /agent-network/providers/:id/link": ({ body }: { body?: unknown }) =>
+    (body as { flow?: string } | undefined)?.flow === "authorization_code"
+      ? browserFlow("pending")
+      : deviceFlow(),
+  "GET /agent-network/providers/:id/link/:flowId": ({
+    path,
+  }: {
+    path: string;
+  }) =>
+    path.endsWith("/browser-flow-1") ? browserFlow("pending") : deviceFlow(),
+  "POST /agent-network/providers/:id/link/:flowId": () => browserFlow("linked"),
+};
+const deniedDeviceLoginAPI = {
+  ...browserLoginAPI,
+  "POST /agent-network/providers/:id/link": ({ body }: { body?: unknown }) => {
+    if ((body as { flow?: string } | undefined)?.flow === "authorization_code")
+      return browserFlow("pending");
+    throw Object.assign(
+      new Error("Device login is disabled for this account"),
+      {
+        code: 412,
+      },
+    );
+  },
+};
+
+async function openChatGPTLink() {
+  await findText("ChatGPT research");
+  await clickRole("button", /^Link$/);
+  await dialog();
+}
+
+async function openChatGPTBrowserLogin() {
+  await openChatGPTLink();
+  await clickTestId("agent-network-provider-use-browser");
+  await findText("Paste the full callback URL");
+  await settle();
+}
+
+export const ChatGPTBrowserLinkPending: Story = {
+  parameters: { api: browserLoginAPI },
+  play: openChatGPTBrowserLogin,
+};
+
+export const ConnectModalChatGPTBrowserPending: Story = {
+  parameters: { api: browserLoginAPI },
+  play: async () => {
+    await chooseChatGPTLogin();
+    await clickTestId("agent-network-provider-continue");
+    await clickTestId("agent-network-provider-submit");
+    await clickTestId("agent-network-provider-use-browser");
+    await findText("Paste the full callback URL");
+    await settle();
+  },
+};
+
+export const ChatGPTBrowserLinkComplete: Story = {
+  parameters: { api: browserLoginAPI },
+  play: async () => {
+    await openChatGPTBrowserLogin();
+    await type(
+      await waitForSelector(
+        "[data-testid=agent-network-provider-authorization-code]",
+      ),
+      "http://localhost:1455/auth/callback?code=storybook-code&state=storybook-state",
+    );
+    await clickTestId("agent-network-provider-link-submit");
+    await findText(/plan is linked/);
+    await settle();
+  },
+};
+
+export const ChatGPTDeviceLoginUnavailable: Story = {
+  parameters: { api: deniedDeviceLoginAPI },
+  play: async () => {
+    await openChatGPTLink();
+    await findText(/Device login is disabled for this account/);
+    await waitForSelector("[data-testid=agent-network-provider-use-browser]");
+    await settle();
+  },
+};
+
+export const ChatGPTBrowserAfterDeviceDenied: Story = {
+  parameters: { api: deniedDeviceLoginAPI },
+  play: openChatGPTBrowserLogin,
+};
+
+export const ChatGPTBrowserLinkExpired: Story = {
+  parameters: {
+    api: {
+      ...browserLoginAPI,
+      "POST /agent-network/providers/:id/link": ({
+        body,
+      }: {
+        body?: unknown;
+      }) =>
+        (body as { flow?: string } | undefined)?.flow === "authorization_code"
+          ? browserFlow("expired")
+          : deviceFlow(),
+    },
+  },
+  play: async () => {
+    await openChatGPTLink();
+    await clickTestId("agent-network-provider-use-browser");
+    await findText("The code expired before the login was approved.");
+    await settle();
+  },
+};
+
+export const ChatGPTLegacyDeviceLogin: Story = {
+  parameters: {
+    api: {
+      ...browserLoginAPI,
+      "GET /agent-network/catalog/providers": agentProviderCatalog.map(
+        (provider) =>
+          provider.id === "chatgpt_codex"
+            ? {
+                ...provider,
+                subscription_login: {
+                  flow: "device",
+                  verification_uri: "https://auth.openai.com/codex/device",
+                },
+              }
+            : provider,
+      ),
+    },
+  },
+  play: async () => {
+    await openChatGPTLink();
+    await findText("WDJB-MJHT");
+    expect(
+      document.querySelector(
+        "[data-testid=agent-network-provider-use-browser]",
+      ),
+    ).toBeNull();
     await settle();
   },
 };

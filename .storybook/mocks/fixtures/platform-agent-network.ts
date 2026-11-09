@@ -54,6 +54,7 @@ const catalog = [
     credential_kind: "user_oauth",
     subscription_login: {
       flow: "device",
+      supported_flows: ["device", "authorization_code"],
       verification_uri: "https://auth.openai.com/codex/device",
     },
     models: [],
@@ -653,6 +654,19 @@ export const claudeLinkFlow =
     verification_uri: "",
   });
 
+export const chatgptBrowserLinkFlow =
+  (status: "pending" | "linked" | "expired" | "failed") => () => ({
+    ...linkFlow(status)(),
+    id: "browser-flow-1",
+    flow: "authorization_code",
+    authorization_uri:
+      "https://auth.openai.com/oauth/authorize?state=storybook-state&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback",
+    user_code: "",
+    verification_uri: "",
+  });
+
+export const agentProviderCatalog = catalog;
+
 export const agentConfigUnconfigured = {
   configured: false,
   endpoint: "",
@@ -876,8 +890,21 @@ export const agentNetworkFixtures: Record<string, Handler> = {
     };
   },
   // Linking a provider's login: it stays pending until a story says otherwise.
-  "POST /agent-network/providers/:id/link": linkFlow("pending"),
-  "GET /agent-network/providers/:id/link/:flowId": linkFlow("pending"),
-  "POST /agent-network/providers/:id/link/:flowId": claudeLinkFlow("linked"),
+  "POST /agent-network/providers/:id/link": ({ body }: HandlerContext) =>
+    (body as { flow?: string })?.flow === "authorization_code"
+      ? chatgptBrowserLinkFlow("pending")()
+      : linkFlow("pending")(),
+  "GET /agent-network/providers/:id/link/:flowId": ({
+    path,
+  }: HandlerContext) =>
+    path.endsWith("/browser-flow-1")
+      ? chatgptBrowserLinkFlow("pending")()
+      : linkFlow("pending")(),
+  "POST /agent-network/providers/:id/link/:flowId": ({
+    path,
+  }: HandlerContext) =>
+    path.endsWith("/browser-flow-1")
+      ? chatgptBrowserLinkFlow("linked")()
+      : claudeLinkFlow("linked")(),
   "DELETE /agent-network/providers/:id/link": {},
 };

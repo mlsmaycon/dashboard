@@ -309,3 +309,110 @@ describe("authorization-code linking", () => {
     },
   );
 });
+
+describe("switching login methods", () => {
+  const browserFlow: LinkFlow = {
+    ...flow("pending"),
+    id: "browser-flow",
+    flow: "authorization_code",
+    authorization_uri: "https://auth.openai.com/oauth/authorize",
+  };
+
+  it("keeps the default request unchanged and preserves browser selection across failed starts and retries", async () => {
+    post
+      .mockRejectedValueOnce({ code: 412 })
+      .mockRejectedValueOnce({ code: 502 })
+      .mockResolvedValueOnce(browserFlow);
+    const { result } = await startLink();
+    expect(post).toHaveBeenNthCalledWith(1, {}, "/anp-chatgpt/link");
+    act(() => result.current.start("anp-chatgpt", "authorization_code"));
+    await flush();
+    expect(result.current.state.phase).toBe("unavailable");
+    act(() => result.current.retry());
+    await flush();
+    expect(post).toHaveBeenNthCalledWith(
+      2,
+      { flow: "authorization_code" },
+      "/anp-chatgpt/link",
+    );
+    expect(post).toHaveBeenNthCalledWith(
+      3,
+      { flow: "authorization_code" },
+      "/anp-chatgpt/link",
+    );
+    expect(result.current.state).toMatchObject({
+      phase: "pending",
+      flow: { id: "browser-flow" },
+    });
+  });
+
+  it("keeps browser mode when an expired flow is retried, then resets on cancel and fresh open", async () => {
+    post
+      .mockResolvedValueOnce(flow("pending"))
+      .mockResolvedValueOnce({ ...browserFlow, status: "expired" })
+      .mockResolvedValueOnce(browserFlow)
+      .mockResolvedValueOnce(flow("pending"));
+    const { result } = await startLink();
+    act(() => result.current.start("anp-chatgpt", "authorization_code"));
+    await flush();
+    expect(result.current.state.phase).toBe("expired");
+    act(() => result.current.retry());
+    await flush();
+    expect(post).toHaveBeenLastCalledWith(
+      { flow: "authorization_code" },
+      "/anp-chatgpt/link",
+    );
+    act(() => result.current.cancel());
+    expect(result.current.requestedFlow).toBeUndefined();
+    act(() => result.current.retry());
+    expect(post).toHaveBeenCalledTimes(3);
+    act(() => result.current.start("anp-chatgpt"));
+    await flush();
+    expect(post).toHaveBeenLastCalledWith({}, "/anp-chatgpt/link");
+  });
+
+  it("drops a late device poll after switching to browser sign-in", async () => {
+    let poll: (value: LinkFlow) => void = () => {};
+    post
+      .mockResolvedValueOnce(flow("pending"))
+      .mockResolvedValueOnce(browserFlow);
+    get.mockImplementationOnce(
+      () =>
+        new Promise<LinkFlow>((resolve) => {
+          poll = resolve;
+        }),
+    );
+    const { result, onLinked } = await startLink();
+    await tick(5000);
+    act(() => result.current.start("anp-chatgpt", "authorization_code"));
+    await flush();
+    poll(flow("linked"));
+    await flush();
+    expect(result.current.state).toMatchObject({
+      phase: "pending",
+      flow: { id: "browser-flow" },
+    });
+    expect(onLinked).not.toHaveBeenCalled();
+  });
+
+  it("drops a late device start after a newer browser start", async () => {
+    let deviceStart: (value: LinkFlow) => void = () => {};
+    post
+      .mockImplementationOnce(
+        () =>
+          new Promise<LinkFlow>((resolve) => {
+            deviceStart = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(browserFlow);
+    const { result } = await startLink();
+    act(() => result.current.start("anp-chatgpt", "authorization_code"));
+    await flush();
+    deviceStart(flow("pending"));
+    await flush();
+    expect(result.current.state).toMatchObject({
+      phase: "pending",
+      flow: { id: "browser-flow" },
+    });
+  });
+});

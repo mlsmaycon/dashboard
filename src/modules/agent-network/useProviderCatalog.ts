@@ -2,7 +2,10 @@
 
 import useFetchApi from "@utils/api";
 import { useMemo } from "react";
-import type { CredentialKind } from "@/modules/agent-network/subscriptionLink";
+import type {
+  CredentialKind,
+  LinkFlowKind,
+} from "@/modules/agent-network/subscriptionLink";
 
 export type CatalogModel = {
   id: string;
@@ -69,7 +72,8 @@ export type CatalogSubscriptionLogin = {
   // "device": the user enters a short code on verification_uri while the
   // dashboard polls for the result. "authorization_code": the user opens the
   // flow's authorization_uri, then pastes the returned code into the dashboard.
-  flow: "device" | "authorization_code";
+  flow: LinkFlowKind;
+  supported_flows?: LinkFlowKind[];
   verification_uri?: string;
 };
 

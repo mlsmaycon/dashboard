@@ -960,7 +960,10 @@ export default function AIProviderModal({
             <ProviderLinkBody
               state={link.state}
               catalogId={providerId}
-              onRetry={() => link.start(linkTarget)}
+              onRetry={link.retry}
+              onUseBrowser={() => link.start(linkTarget, "authorization_code")}
+              subscriptionLogin={catalog?.subscription_login}
+              requestedFlow={link.requestedFlow}
               onComplete={link.complete}
             />
           </div>

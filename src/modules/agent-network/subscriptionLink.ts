@@ -22,6 +22,7 @@ export type SubscriptionLink = {
 };
 
 export type LinkFlowStatus = "pending" | "linked" | "expired" | "failed";
+export type LinkFlowKind = "device" | "authorization_code";
 
 // A login in progress. Missing flow means device for older management servers.
 export type LinkFlow = {
@@ -31,7 +32,7 @@ export type LinkFlow = {
   verification_uri: string;
   expires_at: string;
   interval_seconds: number;
-  flow?: "device" | "authorization_code";
+  flow?: LinkFlowKind;
   authorization_uri?: string;
 };
 
@@ -158,6 +159,39 @@ export type LinkState =
   // or no datastore encryption key; 403: no permission to edit providers;
   // 404: provider gone).
   | { phase: "unavailable"; message: string };
+
+// Older catalogs don't advertise alternatives. Never offer a request shape
+// their server may not understand, even for a known provider id.
+export function canUseBrowserLogin(
+  login: { flow: LinkFlowKind; supported_flows?: LinkFlowKind[] } | undefined,
+  state: LinkState,
+  requestedFlow?: LinkFlowKind,
+): boolean {
+  if (!login?.supported_flows?.includes("authorization_code")) return false;
+  if (state.phase === "pending")
+    return (state.flow.flow ?? "device") === "device";
+  return (
+    state.phase === "unavailable" && (requestedFlow ?? login.flow) === "device"
+  );
+}
+
+export function authorizationCodeInstructions(catalogId: string) {
+  if (catalogId === "chatgpt_codex") {
+    return {
+      label: "Paste the full callback URL",
+      placeholder: "http://localhost:1455/auth/callback?code=...&state=...",
+      help: "After approving, your browser opens http://localhost:1455/auth/callback. The localhost page may not load. Copy the complete URL from your browser’s address bar and paste it here, including code and state.",
+      completionError:
+        "The login could not be completed. Copy the full callback URL from your browser’s address bar and try again, or start a new login.",
+    };
+  }
+  return {
+    label: "Paste the code from the sign-in page",
+    placeholder: "Authorization code or callback URL",
+    help: undefined,
+    completionError: undefined,
+  };
+}
 
 export type LinkAction =
   | { type: "start" }

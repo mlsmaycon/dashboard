@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   authMethodOf,
+  canUseBrowserLogin,
   catalogIdFor,
   codexSubscriptionLines,
   IDLE,
@@ -268,6 +269,64 @@ describe("pollDelayMs", () => {
   it("honours the server interval, falling back to five seconds", () => {
     expect(pollDelayMs({ interval_seconds: 7 })).toBe(7000);
     expect(pollDelayMs({ interval_seconds: 0 })).toBe(5000);
+  });
+});
+
+describe("browser login availability", () => {
+  const device: LinkState = {
+    phase: "pending",
+    flow: flow("pending"),
+    checkedAt: 1,
+  };
+  const supported = {
+    flow: "device" as const,
+    supported_flows: ["device", "authorization_code"] as (
+      | "device"
+      | "authorization_code"
+    )[],
+  };
+
+  it("requires the catalog to advertise browser login", () => {
+    expect(canUseBrowserLogin(undefined, device)).toBe(false);
+    expect(canUseBrowserLogin({ flow: "device" }, device)).toBe(false);
+    expect(
+      canUseBrowserLogin(
+        { flow: "device", supported_flows: ["device"] },
+        device,
+      ),
+    ).toBe(false);
+    expect(canUseBrowserLogin(supported, device)).toBe(true);
+  });
+
+  it("offers a fallback after a refused device start but not after a browser start", () => {
+    const unavailable: LinkState = {
+      phase: "unavailable",
+      message: "Device login is unavailable",
+    };
+    expect(canUseBrowserLogin(supported, unavailable)).toBe(true);
+    expect(
+      canUseBrowserLogin(supported, unavailable, "authorization_code"),
+    ).toBe(false);
+  });
+
+  it("does not switch an authorization attempt or an exchange already in progress", () => {
+    const browser = {
+      ...device,
+      flow: flow("pending", { flow: "authorization_code" }),
+    };
+    expect(canUseBrowserLogin(supported, browser)).toBe(false);
+    expect(
+      canUseBrowserLogin(supported, { ...browser, phase: "completing" }),
+    ).toBe(false);
+    expect(
+      canUseBrowserLogin(supported, { phase: "linked", flow: flow("linked") }),
+    ).toBe(false);
+    expect(
+      canUseBrowserLogin(
+        { flow: "authorization_code", supported_flows: ["authorization_code"] },
+        { phase: "unavailable", message: "Unavailable" },
+      ),
+    ).toBe(false);
   });
 });
 

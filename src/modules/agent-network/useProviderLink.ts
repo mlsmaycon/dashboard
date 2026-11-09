@@ -1,12 +1,13 @@
 "use client";
 
 import { ErrorResponse, useApiCall } from "@utils/api";
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useSWRConfig } from "swr";
 import { useEventCallback } from "@/hooks/useEventCallback";
 import {
   IDLE,
   LinkFlow,
+  LinkFlowKind,
   linkReducer,
   pollDelayMs,
 } from "@/modules/agent-network/subscriptionLink";
@@ -31,11 +32,13 @@ const linkSuffix = (providerId: string) => `/${providerId}/link`;
  */
 export function useProviderLink({ onLinked }: { onLinked?: () => void } = {}) {
   const [state, dispatch] = useReducer(linkReducer, IDLE);
+  const [requestedFlow, setRequestedFlow] = useState<LinkFlowKind>();
   // Errors are shown in the dialog, which knows what each one means here,
   // instead of the generic request-failed toast.
   const api = useApiCall<LinkFlow>(PROVIDERS_PATH, true);
-  const requestStart = useEventCallback((providerId: string) =>
-    api.post({}, linkSuffix(providerId)),
+  const requestStart = useEventCallback(
+    (providerId: string, flow?: LinkFlowKind) =>
+      api.post(flow ? { flow } : {}, linkSuffix(providerId)),
   );
   const requestFlow = useEventCallback((providerId: string, flowId: string) =>
     api.get(`${linkSuffix(providerId)}/${flowId}`),
@@ -60,13 +63,14 @@ export function useProviderLink({ onLinked }: { onLinked?: () => void } = {}) {
   }, []);
 
   const start = useCallback(
-    (providerId: string) => {
+    (providerId: string, flow?: LinkFlowKind) => {
       const current = ++attempt.current;
       submitting.current = false;
       target.current = providerId;
+      setRequestedFlow(flow);
       const live = () => mounted.current && attempt.current === current;
       dispatch({ type: "start" });
-      requestStart(providerId)
+      requestStart(providerId, flow)
         .then(
           (flow) => live() && dispatch({ type: "flow", flow, at: Date.now() }),
         )
@@ -76,6 +80,12 @@ export function useProviderLink({ onLinked }: { onLinked?: () => void } = {}) {
     },
     [requestStart],
   );
+
+  // Retrying preserves an explicitly selected method; a fresh start without
+  // one keeps the server's default, including on older management servers.
+  const retry = useEventCallback(() => {
+    if (target.current) start(target.current, requestedFlow);
+  });
 
   // Authorization codes are single-use. Never retry this POST automatically,
   // and invalidate any already-running poll before submitting it.
@@ -139,10 +149,12 @@ export function useProviderLink({ onLinked }: { onLinked?: () => void } = {}) {
   const cancel = useCallback(() => {
     attempt.current++;
     submitting.current = false;
+    setRequestedFlow(undefined);
+    target.current = "";
     dispatch({ type: "cancel" });
   }, []);
 
-  return { state, start, complete, cancel } as const;
+  return { state, requestedFlow, start, retry, complete, cancel } as const;
 }
 
 /**

@@ -20,6 +20,7 @@ import {
   planLabel,
   subscriptionName,
 } from "@/modules/agent-network/subscriptionLink";
+import { useProviderCatalog } from "@/modules/agent-network/useProviderCatalog";
 import {
   useProviderLink,
   useProviderUnlink,
@@ -37,6 +38,7 @@ export default function ProviderLoginCell({
 }
 
 function ProviderLoginActions({ provider }: { provider: AIProvider }) {
+  const { getById } = useProviderCatalog();
   const { confirm } = useDialog();
   const { permission } = usePermissions();
   const canUpdate = !!permission?.["agent_network.providers"]?.update;
@@ -121,7 +123,10 @@ function ProviderLoginActions({ provider }: { provider: AIProvider }) {
       <ProviderLinkModal
         open={open}
         onClose={closeLink}
-        onRetry={() => link.start(provider.id)}
+        onRetry={link.retry}
+        onUseBrowser={() => link.start(provider.id, "authorization_code")}
+        subscriptionLogin={getById(provider.providerId)?.subscription_login}
+        requestedFlow={link.requestedFlow}
         onComplete={link.complete}
         state={link.state}
         catalogId={provider.providerId}

@@ -25,12 +25,16 @@ import React, { useState } from "react";
 import AIProviderLogo from "@/modules/agent-network/AIProviderLogo";
 import { AIProviderId } from "@/modules/agent-network/data/mockData";
 import {
+  authorizationCodeInstructions,
+  canUseBrowserLogin,
   LinkFlow,
+  LinkFlowKind,
   LinkState,
   minutesLeft,
   planLabel,
   subscriptionName,
 } from "@/modules/agent-network/subscriptionLink";
+import type { CatalogSubscriptionLogin } from "@/modules/agent-network/useProviderCatalog";
 
 type Props = {
   open: boolean;
@@ -41,6 +45,9 @@ type Props = {
   catalogId: string;
   // Plan the server reported once the link landed, read from the provider.
   planType?: string;
+  subscriptionLogin?: CatalogSubscriptionLogin;
+  requestedFlow?: LinkFlowKind;
+  onUseBrowser?: () => void;
 };
 
 // ProviderLinkModal links a subscription login to an existing provider, for
@@ -54,6 +61,9 @@ export default function ProviderLinkModal({
   state,
   catalogId,
   planType,
+  subscriptionLogin,
+  requestedFlow,
+  onUseBrowser,
 }: Readonly<Props>) {
   const done = state.phase === "linked";
 
@@ -72,6 +82,9 @@ export default function ProviderLinkModal({
             planType={planType}
             onRetry={onRetry}
             onComplete={onComplete}
+            subscriptionLogin={subscriptionLogin}
+            requestedFlow={requestedFlow}
+            onUseBrowser={onUseBrowser}
           />
         </div>
 
@@ -109,14 +122,35 @@ export function ProviderLinkBody({
   planType,
   onRetry,
   onComplete,
+  subscriptionLogin,
+  requestedFlow,
+  onUseBrowser,
 }: {
   state: LinkState;
   catalogId: string;
   planType?: string;
   onRetry: () => void;
   onComplete: (code: string) => void;
+  subscriptionLogin?: CatalogSubscriptionLogin;
+  requestedFlow?: LinkFlowKind;
+  onUseBrowser?: () => void;
 }) {
   const name = subscriptionName(catalogId);
+  const browserAlternative =
+    onUseBrowser &&
+    canUseBrowserLogin(subscriptionLogin, state, requestedFlow) ? (
+      <div className={"mt-4 flex"}>
+        <Button
+          variant={"secondary"}
+          size={"sm"}
+          onClick={onUseBrowser}
+          data-testid={"agent-network-provider-use-browser"}
+        >
+          <ExternalLinkIcon size={14} />
+          Use browser sign-in
+        </Button>
+      </div>
+    ) : null;
   switch (state.phase) {
     case "idle":
     case "starting":
@@ -135,6 +169,7 @@ export function ProviderLinkBody({
             flow={state.flow}
             checkedAt={state.checkedAt}
             name={name}
+            catalogId={catalogId}
             completing={state.phase === "completing"}
             error={
               state.phase === "pending" ? state.completionError : undefined
@@ -144,11 +179,14 @@ export function ProviderLinkBody({
         );
       }
       return (
-        <PendingSteps
-          flow={state.flow}
-          checkedAt={state.checkedAt}
-          name={name}
-        />
+        <>
+          <PendingSteps
+            flow={state.flow}
+            checkedAt={state.checkedAt}
+            name={name}
+          />
+          {browserAlternative}
+        </>
       );
     case "linked": {
       const plan = planLabel(planType);
@@ -180,7 +218,12 @@ export function ProviderLinkBody({
         </Retry>
       );
     case "unavailable":
-      return <Retry onRetry={onRetry}>{state.message}</Retry>;
+      return (
+        <>
+          <Retry onRetry={onRetry}>{state.message}</Retry>
+          {browserAlternative}
+        </>
+      );
   }
 }
 
@@ -188,6 +231,7 @@ function AuthorizationCodeSteps({
   flow,
   checkedAt,
   name,
+  catalogId,
   completing,
   error,
   onComplete,
@@ -195,11 +239,13 @@ function AuthorizationCodeSteps({
   flow: LinkFlow;
   checkedAt: number;
   name: string;
+  catalogId: string;
   completing: boolean;
   error?: string;
   onComplete: (code: string) => void;
 }) {
   const [code, setCode] = useState("");
+  const instructions = authorizationCodeInstructions(catalogId);
   const uri = flow.authorization_uri;
   const minutes = minutesLeft(flow.expires_at, checkedAt);
   if (!uri)
@@ -233,7 +279,7 @@ function AuthorizationCodeSteps({
       </Steps.Step>
       <Steps.Step step={2} line={false}>
         <label htmlFor={"provider-authorization-code"}>
-          Paste the code from the sign-in page
+          {instructions.label}
         </label>
         <form
           className={"flex flex-col gap-3"}
@@ -253,8 +299,13 @@ function AuthorizationCodeSteps({
             value={code}
             onChange={(event) => setCode(event.target.value)}
             disabled={completing}
-            placeholder={"Authorization code or callback URL"}
+            placeholder={instructions.placeholder}
           />
+          {instructions.help && (
+            <p className={"text-sm text-nb-gray-400 font-normal"}>
+              {instructions.help}
+            </p>
+          )}
           <p className={"text-xs text-nb-gray-400 font-normal"}>
             {minutes > 0
               ? `This sign-in expires in ${minutes} ${
@@ -262,7 +313,11 @@ function AuthorizationCodeSteps({
                 }.`
               : "This sign-in is about to expire."}
           </p>
-          {error && <Callout variant={"warning"}>{error}</Callout>}
+          {error && (
+            <Callout variant={"warning"}>
+              {instructions.completionError ?? error}
+            </Callout>
+          )}
           <div className={"flex"}>
             <Button
               type={"submit"}
